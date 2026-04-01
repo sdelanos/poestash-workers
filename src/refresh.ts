@@ -96,8 +96,10 @@ async function searchCombo(
     return { listingCount: 0, minPriceChaos: null };
   }
 
+  // Fetch cheapest 10 listings (1 API call — fetch endpoint accepts up to 10 IDs)
+  const ids = searchData.result.slice(0, 10).join(",");
   const fetchRes = await fetch(
-    `${TRADE_BASE}/fetch/${searchData.result[0]}?query=${searchData.id}`,
+    `${TRADE_BASE}/fetch/${ids}?query=${searchData.id}`,
     { headers, signal: AbortSignal.timeout(15_000) },
   );
 
@@ -113,16 +115,45 @@ async function searchCombo(
     result: { listing: { price: { amount: number; currency: string } } }[];
   } = await fetchRes.json();
 
-  const listing = fetchData.result[0];
-  if (!listing?.listing?.price) {
+  // Convert all prices to chaos
+  const chaosPrices: number[] = [];
+  for (const item of fetchData.result) {
+    const price = item?.listing?.price;
+    if (!price) continue;
+    const rate = currencyToChaos.get(price.currency);
+    if (rate != null) chaosPrices.push(price.amount * rate);
+  }
+
+  if (chaosPrices.length === 0) {
     return { listingCount: searchData.total, minPriceChaos: null };
   }
 
-  const { amount, currency } = listing.listing.price;
-  const rate = currencyToChaos.get(currency);
-  const minPriceChaos = rate != null ? amount * rate : null;
-
+  // Outlier-resistant pricing: skip price fixers
+  const minPriceChaos = getResistantPrice(chaosPrices);
   return { listingCount: searchData.total, minPriceChaos };
+}
+
+/**
+ * Get a price-fixer-resistant market price from a list of chaos prices.
+ *
+ * With fewer than 3 listings, just use the cheapest (can't detect fixers).
+ * With 3+, compute the median and use the cheapest listing within 50% of it.
+ * This skips 1c price fixers when the real market is 200c+.
+ */
+function getResistantPrice(prices: number[]): number {
+  prices.sort((a, b) => a - b);
+  if (prices.length < 3) return prices[0];
+
+  const mid = Math.floor(prices.length / 2);
+  const median = prices.length % 2 === 0
+    ? (prices[mid - 1] + prices[mid]) / 2
+    : prices[mid];
+
+  const threshold = median * 0.5;
+  for (const p of prices) {
+    if (p >= threshold) return p;
+  }
+  return prices[0];
 }
 
 // ---------------------------------------------------------------------------
