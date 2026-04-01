@@ -1,0 +1,46 @@
+name: Refresh Cluster Prices
+on:
+  schedule:
+    # Full pass at 06:00 UTC, quick pass at 18:00 UTC
+    - cron: '0 6 * * *'
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - quick
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      POE_CLIENT_ID: ${{ secrets.POE_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Refresh cluster prices
+        run: |
+          if [ "${{ github.event.schedule }}" = "0 18 * * *" ]; then
+            echo "Running QUICK pass (listings only)"
+            npm run refresh:quick
+          elif [ "${{ inputs.mode }}" = "quick" ]; then
+            echo "Running QUICK pass (manual trigger)"
+            npm run refresh:quick
+          else
+            echo "Running FULL pass"
+            npm run refresh
+          fi
