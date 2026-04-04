@@ -184,7 +184,6 @@ async function main() {
     SELECT count(*) FROM cluster_jewel_prices WHERE league = ${league}
   `;
 
-  const maxAge = 24 * 60 * 60 * 1000;
   const estHours = (Number(targetCount) * PAUSE_MS / 1000 / 3600).toFixed(1);
   console.log(`Target: ${targetCount} combos, ~${estHours} hours at ${PAUSE_MS / 1000}s/combo`);
   console.log(`Ctrl+C to stop gracefully\n`);
@@ -195,21 +194,21 @@ async function main() {
   const startTime = Date.now();
 
   while (!stopping) {
+    // Combos with listings: refresh every 24h
+    // Combos with 0 listings: refresh every 48h
     const [combo] = await sql`
       SELECT league, enchantment_tag, jewel_size, combo_key, trade_stat_ids, listing_count, last_refreshed_at
       FROM cluster_jewel_prices
       WHERE league = ${league}
+        AND (last_refreshed_at IS NULL
+          OR (listing_count > 0 AND last_refreshed_at < NOW() - INTERVAL '24 hours')
+          OR (listing_count = 0 AND last_refreshed_at < NOW() - INTERVAL '48 hours'))
       ORDER BY last_refreshed_at ASC NULLS FIRST
       LIMIT 1
     `;
 
     if (!combo) {
-      console.log("No combos to process!");
-      break;
-    }
-
-    if (combo.last_refreshed_at && Date.now() - new Date(combo.last_refreshed_at).getTime() < maxAge) {
-      console.log("All combos refreshed within 24h. Done.");
+      console.log("All combos fresh. Done.");
       break;
     }
 
