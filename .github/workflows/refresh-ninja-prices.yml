@@ -1,9 +1,9 @@
 name: Refresh Ninja Prices
 on:
   schedule:
-    # Every 10 minutes — each run fetches all poe.ninja categories and
-    # batch-upserts ~40k rows. Completes in ~5-10 seconds.
-    - cron: '*/10 * * * *'
+    # Every 20 minutes — each run fetches all poe.ninja categories and
+    # batch-upserts ~40k rows. Completes in ~15 seconds.
+    - cron: '*/20 * * * *'
   workflow_dispatch: {}
 
 concurrency:
