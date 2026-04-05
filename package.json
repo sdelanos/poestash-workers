@@ -1,16 +1,18 @@
 {
-  "name": "poestash-cluster-prices",
+  "name": "poestash-workers",
   "version": "1.0.0",
   "private": true,
-  "description": "Fetches cluster jewel combo prices from the PoE trade API and stores them in Supabase.",
+  "description": "Background workers for poestash: ninja prices + cluster jewel combo prices.",
   "scripts": {
-    "refresh": "tsx src/refresh.ts"
+    "refresh:clusters": "tsx src/refresh-cluster-prices.ts",
+    "refresh:ninja": "tsx src/refresh-ninja-prices.ts"
   },
   "dependencies": {
     "dotenv": "^17.3.1",
     "postgres": "^3.4.8"
   },
   "devDependencies": {
+    "@types/node": "^25.5.2",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }

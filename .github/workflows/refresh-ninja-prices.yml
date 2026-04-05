@@ -1,0 +1,30 @@
+name: Refresh Ninja Prices
+on:
+  schedule:
+    # Every 10 minutes — each run fetches all poe.ninja categories and
+    # batch-upserts ~40k rows. Completes in ~5-10 seconds.
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ninja-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Refresh ninja prices
+        run: npm run refresh:ninja
