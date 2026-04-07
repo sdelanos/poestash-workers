@@ -1,0 +1,39 @@
+name: Refresh Ultimatum Prices
+on:
+  schedule:
+    # Hourly at :45 — each run fetches Inscribed Ultimatum prices from poe.watch
+    # and batch-upserts ~4k rows per league.
+    - cron: '45 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ultimatum-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Refresh ultimatum prices (Mirage)
+        run: npx tsx src/refresh-ultimatum-prices.ts "Mirage"
+
+      - name: Refresh ultimatum prices (Hardcore Mirage)
+        run: npx tsx src/refresh-ultimatum-prices.ts "Hardcore Mirage"
+
+      - name: Refresh ultimatum prices (Standard)
+        run: npx tsx src/refresh-ultimatum-prices.ts "Standard"
+
+      - name: Refresh ultimatum prices (Hardcore)
+        run: npx tsx src/refresh-ultimatum-prices.ts "Hardcore"
