@@ -105,9 +105,9 @@ async function main() {
     process.exit(1);
   }
 
-  const items: PoeWatchInscribed[] = await res.json();
+  const items: PoeWatchInscribed[] | null = await res.json();
 
-  if (items.length === 0) {
+  if (!items || items.length === 0) {
     console.log(`No Inscribed Ultimatum data for ${league} — skipping`);
     await sql.end();
     return;
