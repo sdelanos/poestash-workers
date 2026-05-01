@@ -60,6 +60,7 @@ async function fetchStashItems(
   game: string,
   league: string,
   type: NinjaType,
+  divineRate: number,
 ): Promise<NinjaFetchedItem[]> {
   const url = `${NINJA_BASE}/stash/current/item/overview?league=${encodeURIComponent(league)}&type=${type}`;
   const res = await fetch(url);
@@ -73,7 +74,7 @@ async function fetchStashItems(
     league,
     itemName: line.name.toLowerCase(),
     chaosValue: line.chaosValue,
-    divineValue: line.divineValue,
+    divineValue: line.divineValue ?? (divineRate > 0 && line.chaosValue != null ? line.chaosValue / divineRate : 0),
     listingCount: line.listingCount,
     source: "stash" as const,
     ninjaCategory: type,
@@ -193,7 +194,7 @@ export async function fetchAllNinjaPrices(
       );
     } else {
       fetches.push(
-        fetchStashItems(game, league, type).catch(() => []),
+        fetchStashItems(game, league, type, divineRate).catch(() => []),
       );
     }
 
