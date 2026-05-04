@@ -1,0 +1,46 @@
+name: Refresh Gem Usage
+on:
+  schedule:
+    # Every 6 hours at :15 — poe.ninja's build snapshots refresh slowly
+    # (every few hours), so polling more often wastes API calls without
+    # giving us fresher data. Each run fetches ~225 KB and writes ~800
+    # rows per league.
+    - cron: '15 */6 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: gem-usage-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Each league step is `continue-on-error: true` so a transient
+      # poe.ninja 404 on one variant (low-pop HC, etc.) doesn't kill
+      # the whole run. The script itself exits 0 for missing-snapshot
+      # cases — this is just belt-and-suspenders.
+
+      - name: Refresh gem usage (Mirage)
+        run: npx tsx src/refresh-gem-usage.ts "Mirage"
+        continue-on-error: true
+
+      - name: Refresh gem usage (Hardcore Mirage)
+        run: npx tsx src/refresh-gem-usage.ts "Hardcore Mirage"
+        continue-on-error: true
+
+      - name: Refresh gem usage (Standard)
+        run: npx tsx src/refresh-gem-usage.ts "Standard"
+        continue-on-error: true

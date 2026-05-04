@@ -5,7 +5,8 @@
   "description": "Background workers for poestash: ninja prices + cluster jewel combo prices.",
   "scripts": {
     "refresh:clusters": "tsx src/refresh-cluster-prices.ts",
-    "refresh:ninja": "tsx src/refresh-ninja-prices.ts"
+    "refresh:ninja": "tsx src/refresh-ninja-prices.ts",
+    "refresh:gem-usage": "tsx src/refresh-gem-usage.ts"
   },
   "dependencies": {
     "dotenv": "^17.3.1",
