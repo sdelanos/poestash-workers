@@ -6,7 +6,8 @@
   "scripts": {
     "refresh:clusters": "tsx src/refresh-cluster-prices.ts",
     "refresh:ninja": "tsx src/refresh-ninja-prices.ts",
-    "refresh:gem-usage": "tsx src/refresh-gem-usage.ts"
+    "refresh:gem-usage": "tsx src/refresh-gem-usage.ts",
+    "refresh:temple": "tsx src/refresh-temple-prices.ts"
   },
   "dependencies": {
     "dotenv": "^17.3.1",

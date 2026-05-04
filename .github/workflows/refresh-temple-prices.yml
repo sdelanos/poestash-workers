@@ -1,0 +1,45 @@
+name: Refresh Temple Prices
+on:
+  schedule:
+    # Hourly at :30 — each run hits the PoE trade API twice per league
+    # (1 search + 1 fetch) for the gem-room t3 pseudo stat. ~8 calls/hour
+    # total across the 4 leagues, well under the 30/300s ceiling.
+    - cron: '30 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: temple-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      POE_CLIENT_ID: ${{ secrets.POE_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Refresh temple prices (Mirage)
+        continue-on-error: true
+        run: npx tsx src/refresh-temple-prices.ts "Mirage"
+
+      - name: Refresh temple prices (Hardcore Mirage)
+        continue-on-error: true
+        run: npx tsx src/refresh-temple-prices.ts "Hardcore Mirage"
+
+      - name: Refresh temple prices (Standard)
+        continue-on-error: true
+        run: npx tsx src/refresh-temple-prices.ts "Standard"
+
+      - name: Refresh temple prices (Hardcore)
+        continue-on-error: true
+        run: npx tsx src/refresh-temple-prices.ts "Hardcore"
