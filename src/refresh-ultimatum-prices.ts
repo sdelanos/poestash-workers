@@ -8,7 +8,12 @@
  *   league    League name (default: Mirage)
  *
  * Designed to run hourly via GitHub Actions cron.
- * Each run does a full refresh: fetch from poe.watch, batch upsert, clean stale rows.
+ * Each run does a full refresh: fetch from poe.watch, batch upsert.
+ *
+ * Rows are never deleted by this worker. poe.watch serves combos
+ * intermittently based on liquidity — keeping the last-known price is
+ * strictly better than serving 0c during a refresh gap. League-level
+ * staleness is implicit in updated_at on individual rows.
  *
  * Requires DATABASE_URL environment variable.
  */
@@ -21,7 +26,6 @@ import postgres from "postgres";
 // ---------------------------------------------------------------------------
 
 const BATCH_SIZE = 500;
-const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
 const POE_WATCH_BASE = "https://api.poe.watch";
 
 // ---------------------------------------------------------------------------
@@ -147,16 +151,9 @@ async function main() {
     }
   }
 
-  // 3. Delete stale rows
-  const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS);
-  const deleted = await sql`
-    DELETE FROM ultimatum_prices
-    WHERE league = ${league} AND updated_at < ${staleThreshold}
-  `;
-
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(
-    `Done in ${elapsed}s — ${items.length} upserted, ${deleted.count} stale deleted`,
+    `Done in ${elapsed}s — ${items.length} upserted`,
   );
 
   await sql.end();

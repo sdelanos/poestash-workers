@@ -8,7 +8,13 @@
  *   league    League name (default: Mirage)
  *
  * Designed to run every ~10 minutes via GitHub Actions cron.
- * Each run does a full refresh: fetch all categories, batch upsert, clean stale rows.
+ * Each run does a full refresh: fetch all categories, batch upsert.
+ *
+ * Rows are never deleted by this worker. poe.ninja serves low-volume
+ * items intermittently — a row that drops out of one response is usually
+ * back in the next. Keeping the last-known price (with whatever updated_at
+ * it has) is strictly better than serving 0c. League-level staleness is
+ * tracked in ninja_price_meta.last_refreshed_at.
  *
  * Requires DATABASE_URL environment variable.
  */
@@ -23,7 +29,6 @@ import type { NinjaFetchedItem } from "./lib/ninja-types";
 // ---------------------------------------------------------------------------
 
 const BATCH_SIZE = 500;
-const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
 
 // All columns in ninja_prices, in insertion order.
 // Must match the ON CONFLICT SET clause below.
@@ -41,8 +46,14 @@ const COLUMNS = [
 // ---------------------------------------------------------------------------
 
 /** Maps a fetcher result (camelCase) to a DB row (snake_case).
- *  JSONB columns are JSON.stringify'd to avoid postgres.js treating
- *  JS arrays as PostgreSQL arrays instead of JSON arrays. */
+ *
+ *  JSONB columns receive their plain JS array / object values directly.
+ *  postgres.js v3 serializes JSONB-typed parameters with `JSON.stringify`
+ *  internally — pre-stringifying here would cause it to stringify a
+ *  string a second time, storing a JSON string scalar (e.g. `"[{...}]"`)
+ *  instead of a JSON array (`[{...}]`). That broke `jsonb_typeof = 'array'`
+ *  filtering on the read side and forced a defensive multi-pass parser
+ *  in `lib/prices/index.ts`. */
 function toDbRow(row: NinjaFetchedItem, now: Date) {
   return {
     game: row.game,
@@ -55,10 +66,10 @@ function toDbRow(row: NinjaFetchedItem, now: Date) {
     ninja_category: row.ninjaCategory,
     icon: row.icon,
     details_id: row.detailsId,
-    sparkline_data: row.sparklineData != null ? JSON.stringify(row.sparklineData) : null,
+    sparkline_data: row.sparklineData ?? null,
     total_change: row.totalChange ?? null,
     stack_size: row.stackSize ?? null,
-    explicit_modifiers: row.explicitModifiers != null ? JSON.stringify(row.explicitModifiers) : null,
+    explicit_modifiers: row.explicitModifiers ?? null,
     variant: row.variant ?? null,
     base_type: row.baseType ?? null,
     links: row.links ?? null,
@@ -71,7 +82,7 @@ function toDbRow(row: NinjaFetchedItem, now: Date) {
     exalted_value: row.exaltedValue ?? null,
     count: row.count ?? null,
     volume: row.volume ?? null,
-    mutated_modifiers: row.mutatedModifiers != null ? JSON.stringify(row.mutatedModifiers) : null,
+    mutated_modifiers: row.mutatedModifiers ?? null,
     updated_at: now,
   };
 }
@@ -181,16 +192,9 @@ async function main() {
       last_refreshed_at = EXCLUDED.last_refreshed_at
   `;
 
-  // 4. Delete stale rows not updated in >1 hour
-  const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS);
-  const deleted = await sql`
-    DELETE FROM ninja_prices
-    WHERE game = ${game} AND league = ${league} AND updated_at < ${staleThreshold}
-  `;
-
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(
-    `Done in ${elapsed}s — ${valid.length} upserted, ${deleted.count} stale deleted, divine=${divineRate.toFixed(1)}c`,
+    `Done in ${elapsed}s — ${valid.length} upserted, divine=${divineRate.toFixed(1)}c`,
   );
 
   await sql.end();
