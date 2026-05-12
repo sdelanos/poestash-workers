@@ -1,11 +1,19 @@
 /**
- * Fetches all poe.ninja prices and stores them in the database.
+ * Fetches poe.ninja prices for one game/league and stores them in the database.
  *
  * Usage:
- *   npx tsx src/refresh-ninja-prices.ts [league]
+ *   npx tsx src/refresh-ninja-prices.ts <league> [game]
  *
- * Options:
- *   league    League name (default: Mirage)
+ *   <league>  League name (e.g. "Mirage", "Fate of the Vaal").
+ *             For game=poe2, pass "auto" to discover all currently-indexed
+ *             PoE 2 leagues via poe.ninja's index-state endpoint and refresh
+ *             each one in series. Zero-touch across league rollovers.
+ *   [game]    "poe1" (default) or "poe2".
+ *
+ * Examples:
+ *   npx tsx src/refresh-ninja-prices.ts "Mirage"
+ *   npx tsx src/refresh-ninja-prices.ts "Fate of the Vaal" poe2
+ *   npx tsx src/refresh-ninja-prices.ts auto poe2
  *
  * Designed to run every ~10 minutes via GitHub Actions cron.
  * Each run does a full refresh: fetch all categories, batch upsert.
@@ -22,7 +30,15 @@
 import "dotenv/config";
 import postgres from "postgres";
 import { fetchAllNinjaPrices } from "./lib/ninja-fetcher";
+import { fetchAllPoe2Prices } from "./lib/ninja-fetcher-poe2";
+import { discoverPoe2Leagues } from "./lib/poe2-leagues";
 import type { NinjaFetchedItem } from "./lib/ninja-types";
+
+type Game = "poe1" | "poe2";
+
+function isGame(value: string): value is Game {
+  return value === "poe1" || value === "poe2";
+}
 
 // ---------------------------------------------------------------------------
 // Config
@@ -91,55 +107,48 @@ function toDbRow(row: NinjaFetchedItem, now: Date) {
 // Main
 // ---------------------------------------------------------------------------
 
-async function main() {
-  const league = process.argv[2] ?? "Mirage";
-  const game = "poe1";
-
-  if (!process.env.DATABASE_URL) {
-    console.error("DATABASE_URL is not set");
-    process.exit(1);
-  }
-
-  const sql = postgres(process.env.DATABASE_URL, {
-    idle_timeout: 30,
-    max_lifetime: 300,
-    connect_timeout: 10,
-    transform: { undefined: null },
-  });
-
+async function refreshOneLeague(
+  sql: postgres.Sql,
+  game: Game,
+  league: string,
+): Promise<{ upserted: number; divineRate: number }> {
   const start = Date.now();
 
-  // 1. Fetch all prices from poe.ninja
   console.log(`Fetching ${game}/${league} prices from poe.ninja...`);
-  const { rows, divineRate } = await fetchAllNinjaPrices(game, league);
+  const { rows, divineRate } =
+    game === "poe2"
+      ? await fetchAllPoe2Prices(league)
+      : await fetchAllNinjaPrices(game, league);
 
   if (rows.length === 0) {
-    console.error("No items fetched from poe.ninja — API may be down");
-    await sql.end();
-    process.exit(1);
+    throw new Error(`No items fetched for ${game}/${league} — poe.ninja may be down`);
   }
 
   // Deduplicate by composite PK (game, league, detailsId, source).
   // poe.ninja can return the same detailsId from multiple categories.
   // PostgreSQL rejects duplicate PK rows within a single INSERT ... ON CONFLICT.
-  const seen = new Map<string, number>();
-  const deduped: typeof rows = [];
+  const seen = new Set<string>();
+  const deduped: NinjaFetchedItem[] = [];
   for (let i = rows.length - 1; i >= 0; i--) {
     const key = `${rows[i].detailsId}:${rows[i].source}`;
     if (!seen.has(key)) {
-      seen.set(key, i);
+      seen.add(key);
       deduped.push(rows[i]);
     }
   }
   deduped.reverse();
 
-  // Filter out items with null chaosValue (e.g. Chaos Orb on exchange — it's the reference currency)
+  // Drop items with null chaosValue (PoE 1's reference currency Chaos Orb
+  // arrives with primaryValue=null on the exchange feed). PoE 2 currently
+  // emits a concrete value for every reference currency, but the filter
+  // is harmless either way.
   const valid = deduped.filter((r) => r.chaosValue != null);
 
   const fetchMs = Date.now() - start;
-  console.log(`Fetched ${rows.length} items, ${valid.length} valid (divine=${divineRate.toFixed(1)}c) in ${fetchMs}ms`);
+  console.log(
+    `  ${rows.length} fetched, ${valid.length} valid (divine=${divineRate.toFixed(1)}c) in ${fetchMs}ms`,
+  );
 
-  // 2. Batch upsert into ninja_prices
   const now = new Date();
   const totalBatches = Math.ceil(valid.length / BATCH_SIZE);
 
@@ -178,11 +187,10 @@ async function main() {
 
     const batchNum = Math.floor(i / BATCH_SIZE) + 1;
     if (batchNum % 20 === 0 || batchNum === totalBatches) {
-      console.log(`  Upserted batch ${batchNum}/${totalBatches}`);
+      console.log(`    upserted batch ${batchNum}/${totalBatches}`);
     }
   }
 
-  // 3. Upsert price metadata
   await sql`
     INSERT INTO ninja_price_meta (game, league, divine_rate, item_count, last_refreshed_at)
     VALUES (${game}, ${league}, ${divineRate}, ${valid.length}, ${now})
@@ -193,11 +201,69 @@ async function main() {
   `;
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-  console.log(
-    `Done in ${elapsed}s — ${valid.length} upserted, divine=${divineRate.toFixed(1)}c`,
-  );
+  console.log(`  done in ${elapsed}s — ${valid.length} upserted`);
 
-  await sql.end();
+  return { upserted: valid.length, divineRate };
+}
+
+async function resolveLeagues(game: Game, league: string): Promise<string[]> {
+  if (game === "poe2" && league === "auto") {
+    const leagues = await discoverPoe2Leagues();
+    if (leagues.length === 0) {
+      throw new Error("poe.ninja index-state returned no indexed PoE 2 leagues");
+    }
+    console.log(`Discovered ${leagues.length} indexed PoE 2 leagues: ${leagues.join(", ")}`);
+    return leagues;
+  }
+  return [league];
+}
+
+async function main() {
+  const league = process.argv[2] ?? "Mirage";
+  const gameArg = process.argv[3] ?? "poe1";
+
+  if (!isGame(gameArg)) {
+    console.error(`Invalid game "${gameArg}". Expected "poe1" or "poe2".`);
+    process.exit(1);
+  }
+  const game: Game = gameArg;
+
+  if (!process.env.DATABASE_URL) {
+    console.error("DATABASE_URL is not set");
+    process.exit(1);
+  }
+
+  const sql = postgres(process.env.DATABASE_URL, {
+    idle_timeout: 30,
+    max_lifetime: 300,
+    connect_timeout: 10,
+    transform: { undefined: null },
+  });
+
+  const overallStart = Date.now();
+  let firstError: unknown = null;
+
+  try {
+    const leagues = await resolveLeagues(game, league);
+
+    for (const l of leagues) {
+      try {
+        await refreshOneLeague(sql, game, l);
+      } catch (err) {
+        console.error(`Failed ${game}/${l}:`, err);
+        // Remember the first failure but keep going so one bad league does
+        // not abort the rest of the refresh.
+        if (firstError == null) firstError = err;
+      }
+    }
+  } finally {
+    await sql.end();
+  }
+
+  const elapsed = ((Date.now() - overallStart) / 1000).toFixed(1);
+  console.log(`All done in ${elapsed}s`);
+
+  if (firstError != null) process.exit(1);
 }
 
 main().catch((err) => {

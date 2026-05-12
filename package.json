@@ -6,6 +6,7 @@
   "scripts": {
     "refresh:clusters": "tsx src/refresh-cluster-prices.ts",
     "refresh:ninja": "tsx src/refresh-ninja-prices.ts",
+    "refresh:ninja:poe2": "tsx src/refresh-ninja-prices.ts auto poe2",
     "refresh:gem-usage": "tsx src/refresh-gem-usage.ts",
     "refresh:temple": "tsx src/refresh-temple-prices.ts"
   },

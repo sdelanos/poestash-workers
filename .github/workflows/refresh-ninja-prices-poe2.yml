@@ -1,0 +1,34 @@
+name: Refresh Ninja Prices (PoE 2)
+on:
+  schedule:
+    # Every 20 minutes. PoE 2 has 13 categories per league and only one
+    # currently-indexed league, so a full refresh is ~14 fetches and a
+    # few hundred upserts. Completes in a few seconds.
+    - cron: '*/20 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ninja-refresh-poe2
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # `auto` discovers every indexed PoE 2 league from poe.ninja's
+      # index-state endpoint and refreshes each one in series. Zero-touch
+      # across league rollovers (Standard, Hardcore, temp leagues, etc).
+      - name: Refresh PoE 2 ninja prices (auto-discovery)
+        run: npx tsx src/refresh-ninja-prices.ts auto poe2
