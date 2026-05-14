@@ -1,0 +1,33 @@
+name: Refresh PoE Leagues
+on:
+  schedule:
+    # Hourly at :15. One OAuth + four /league calls per run. The PoE
+    # leagues list only changes ~4 times per year, but the app reads
+    # from this cache on every render so we want a fresh copy waiting.
+    - cron: '15 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: leagues-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      POE_CLIENT_ID: ${{ secrets.POE_CLIENT_ID }}
+      POE_CLIENT_SECRET: ${{ secrets.POE_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Refresh leagues
+        run: npm run refresh:leagues
