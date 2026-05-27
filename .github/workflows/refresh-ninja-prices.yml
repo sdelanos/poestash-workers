@@ -26,14 +26,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Refresh ninja prices (Mirage)
-        run: npx tsx src/refresh-ninja-prices.ts "Mirage"
-
-      - name: Refresh ninja prices (Hardcore Mirage)
-        run: npx tsx src/refresh-ninja-prices.ts "Hardcore Mirage"
-
-      - name: Refresh ninja prices (Standard)
-        run: npx tsx src/refresh-ninja-prices.ts "Standard"
-
-      - name: Refresh ninja prices (Hardcore)
-        run: npx tsx src/refresh-ninja-prices.ts "Hardcore"
+      # Auto-discovers the PoE 1 leagues poe.ninja currently prices
+      # (Standard, Hardcore, the live challenge league + its HC variant) and
+      # refreshes each. Follows league rollovers with no workflow edit.
+      - name: Refresh ninja prices (auto)
+        run: npx tsx src/refresh-ninja-prices.ts auto poe1

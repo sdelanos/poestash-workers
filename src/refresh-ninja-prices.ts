@@ -31,7 +31,7 @@ import "dotenv/config";
 import postgres from "postgres";
 import { fetchAllNinjaPrices } from "./lib/ninja-fetcher";
 import { fetchAllPoe2Prices } from "./lib/ninja-fetcher-poe2";
-import { discoverPoe2Leagues } from "./lib/poe2-leagues";
+import { discoverPoe1Leagues, discoverPoe2Leagues } from "./lib/ninja-leagues";
 import type { NinjaFetchedItem } from "./lib/ninja-types";
 
 type Game = "poe1" | "poe2";
@@ -207,24 +207,29 @@ async function refreshOneLeague(
 }
 
 async function resolveLeagues(game: Game, league: string): Promise<string[]> {
-  if (game === "poe2" && league === "auto") {
-    const leagues = await discoverPoe2Leagues();
-    if (leagues.length === 0) {
-      // Not an error: poe.ninja has no indexed PoE 2 league right now — the
-      // expected gap between one league ending and the next launching.
-      // Returning [] makes main() skip the refresh and exit 0, so the hourly
-      // cron stays green instead of emailing a failure every hour until the
-      // new league is indexed. A genuine outage throws from
-      // discoverPoe2Leagues (non-OK HTTP) and still fails loudly.
-      console.log(
-        "No indexed PoE 2 leagues on poe.ninja right now (between leagues) — nothing to refresh.",
-      );
-      return [];
-    }
-    console.log(`Discovered ${leagues.length} indexed PoE 2 leagues: ${leagues.join(", ")}`);
-    return leagues;
+  // Explicit league name — refresh exactly that one (manual / ad-hoc runs).
+  if (league !== "auto") return [league];
+
+  // "auto": follow poe.ninja's current league set so rollovers need no code
+  // change. PoE 1 always includes the permanent leagues, so it's never empty;
+  // PoE 2 is empty between leagues.
+  const leagues =
+    game === "poe2" ? await discoverPoe2Leagues() : await discoverPoe1Leagues();
+
+  if (leagues.length === 0) {
+    // Not an error: no league is indexed right now — the expected gap between
+    // one league ending and the next launching. Returning [] makes main()
+    // skip the refresh and exit 0, so the hourly cron stays green instead of
+    // emailing a failure every hour until the new league is indexed. A
+    // genuine outage throws from discovery (non-OK HTTP) and still fails loud.
+    console.log(
+      `No indexed ${game} leagues on poe.ninja right now (between leagues) — nothing to refresh.`,
+    );
+    return [];
   }
-  return [league];
+
+  console.log(`Discovered ${leagues.length} ${game} leagues: ${leagues.join(", ")}`);
+  return leagues;
 }
 
 async function main() {
