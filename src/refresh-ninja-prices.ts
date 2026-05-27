@@ -210,7 +210,16 @@ async function resolveLeagues(game: Game, league: string): Promise<string[]> {
   if (game === "poe2" && league === "auto") {
     const leagues = await discoverPoe2Leagues();
     if (leagues.length === 0) {
-      throw new Error("poe.ninja index-state returned no indexed PoE 2 leagues");
+      // Not an error: poe.ninja has no indexed PoE 2 league right now — the
+      // expected gap between one league ending and the next launching.
+      // Returning [] makes main() skip the refresh and exit 0, so the hourly
+      // cron stays green instead of emailing a failure every hour until the
+      // new league is indexed. A genuine outage throws from
+      // discoverPoe2Leagues (non-OK HTTP) and still fails loudly.
+      console.log(
+        "No indexed PoE 2 leagues on poe.ninja right now (between leagues) — nothing to refresh.",
+      );
+      return [];
     }
     console.log(`Discovered ${leagues.length} indexed PoE 2 leagues: ${leagues.join(", ")}`);
     return leagues;
