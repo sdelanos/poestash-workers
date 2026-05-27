@@ -1,20 +1,23 @@
 /**
- * PoE 2 prices fetcher. Hits poe.ninja's exchange endpoint for each of
- * the 13 verified PoE 2 categories (see ./poe2-categories.ts) and emits
- * `NinjaFetchedItem` rows ready for the same upsert path PoE 1 uses.
+ * PoE 2 prices fetcher. Hits poe.ninja's PoE 2 economy feeds for each
+ * category in ./poe2-categories.ts and emits `NinjaFetchedItem` rows ready
+ * for the same upsert path PoE 1 uses.
+ *
+ * Two feeds, dispatched by each category's `view`:
+ *   - "exchange" (the 13 GENERAL categories): the Currency-Exchange
+ *     `exchange/current/overview` feed. Stackable currency-like items.
+ *   - "item" (the 8 EQUIPMENT/unique categories): the named-item
+ *     `stash/current/item/overview` feed. Carries baseType, level,
+ *     corruption, and explicit mods; source is "stash" like PoE 1 uniques.
  *
  * Differences from PoE 1 worth knowing:
  *   - URL base is `/poe2/api/economy` (vs `/poe1/`).
- *   - Only exchange-source data exists for PoE 2. No stash-format fetch.
  *   - Primary denomination on responses is **divine**, not chaos. The
- *     `line.primaryValue` for a row is the price in divines. We multiply
- *     by `core.rates.chaos` (chaos-per-divine) to populate the canonical
+ *     `primaryValue` for a row is the price in divines. We multiply by
+ *     `core.rates.chaos` (chaos-per-divine) to populate the canonical
  *     `chaosValue` schema column, then derive `divineValue` from chaos
- *     using the same rate, matching the PoE 1 semantics.
- *   - Categories number 13 (vs PoE 1's 40), so this issues ~14 fetches
- *     per refresh (1 for divine rate + 13 in parallel for categories).
- *     One of those is the Currency category itself, which we re-fetch
- *     during the parallel pass for consistency.
+ *     using the same rate, matching the PoE 1 semantics. Both feeds share
+ *     the one divine rate fetched up front from Currency.
  */
 
 import type { NinjaExchangeResponse, NinjaFetchedItem } from "./ninja-types";
@@ -125,6 +128,91 @@ async function fetchCategory(
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Named-item feed (uniques): stash/current/item/overview
+// ---------------------------------------------------------------------------
+
+/** One row from the PoE 2 named-item feed. Same `primaryValue` + shared
+ *  `core` rates as the exchange feed, plus item identity fields. */
+interface Poe2ItemLine {
+  detailsId: string;
+  name: string;
+  baseType?: string;
+  icon?: string;
+  levelRequired?: number;
+  primaryValue: number | null;
+  listingCount?: number;
+  corrupted?: boolean;
+  sparkLine?: { totalChange: number; data: (number | null)[] };
+  explicitModifiers?: { text: string; optional: boolean }[];
+}
+
+interface Poe2ItemResponse {
+  lines?: Poe2ItemLine[];
+}
+
+/** poe.ninja wraps mod text in wiki markup: `[Display]` and `[Key|Display]`.
+ *  Strip it to the plain text players read so the stored data is clean for
+ *  any consumer. `[ElementalDamage|Elemental Damage]` → "Elemental Damage",
+ *  `[Gain]` → "Gain". */
+function cleanModText(text: string): string {
+  return text
+    .replace(/\[[^\]|]+\|([^\]]+)\]/g, "$1")
+    .replace(/\[([^\]]+)\]/g, "$1");
+}
+
+/** Fetch one PoE 2 named-item category (uniques). Same per-category
+ *  fault tolerance as `fetchCategory`. */
+async function fetchItemCategory(
+  league: string,
+  apiType: string,
+  rate: RateInfo,
+): Promise<NinjaFetchedItem[]> {
+  const url = `${NINJA_BASE}/stash/current/item/overview?league=${encodeURIComponent(league)}&type=${apiType}`;
+  const res = await fetch(url);
+  if (!res.ok) return [];
+
+  const data = (await res.json()) as Poe2ItemResponse;
+  if (!data.lines?.length) return [];
+
+  const chaosRatio = rate.primaryIsDivine ? rate.divineRate : 1;
+  const out: NinjaFetchedItem[] = [];
+
+  for (const line of data.lines) {
+    if (line.primaryValue == null) continue;
+
+    const chaosValue = line.primaryValue * chaosRatio;
+    const divineValue = chaosValue / rate.divineRate;
+
+    out.push({
+      game: "poe2",
+      league,
+      itemName: line.name.toLowerCase(),
+      chaosValue,
+      divineValue,
+      listingCount: line.listingCount ?? 0,
+      // PoE 2 uniques have a single source on poe.ninja (the named-item
+      // feed), so "stash" is their canonical source — same as PoE 1 uniques.
+      source: "stash",
+      ninjaCategory: apiType,
+      icon: line.icon ?? null,
+      detailsId: line.detailsId,
+      sparklineData: line.sparkLine?.data ?? null,
+      totalChange: line.sparkLine?.totalChange ?? null,
+      baseType: line.baseType ?? null,
+      corrupted: line.corrupted ?? null,
+      levelRequired: line.levelRequired ?? null,
+      explicitModifiers:
+        line.explicitModifiers?.map((m) => ({
+          text: cleanModText(m.text),
+          optional: m.optional,
+        })) ?? null,
+    });
+  }
+
+  return out;
+}
+
 export async function fetchAllPoe2Prices(
   league: string,
 ): Promise<{ rows: NinjaFetchedItem[]; divineRate: number }> {
@@ -134,7 +222,10 @@ export async function fetchAllPoe2Prices(
 
   const results = await Promise.all(
     POE2_CATEGORIES.map((cat) =>
-      fetchCategory(league, cat.apiType, rate).catch(() => [] as NinjaFetchedItem[]),
+      (cat.view === "item"
+        ? fetchItemCategory(league, cat.apiType, rate)
+        : fetchCategory(league, cat.apiType, rate)
+      ).catch(() => [] as NinjaFetchedItem[]),
     ),
   );
 
