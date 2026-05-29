@@ -109,7 +109,9 @@ async function main() {
     for (const pair of PAIRS) {
       try {
         const leagues = await fetchLeagues(token, pair.realmParam);
-        const minimal = leagues.map((l) => ({ id: l.id }));
+        // Keep startAt so the app can follow the newest challenge league
+        // during a rollover, when GGG briefly lists both old and new.
+        const minimal = leagues.map((l) => ({ id: l.id, startAt: l.startAt }));
         await sql`
           INSERT INTO poe_leagues_cache (game, realm, leagues, refreshed_at)
           VALUES (${pair.game}, ${pair.realm}, ${sql.json(minimal)}::jsonb, NOW())
