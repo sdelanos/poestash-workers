@@ -115,10 +115,24 @@ async function refreshOneLeague(
   const start = Date.now();
 
   console.log(`Fetching ${game}/${league} prices from poe.ninja...`);
-  const { rows, divineRate } =
-    game === "poe2"
-      ? await fetchAllPoe2Prices(league)
-      : await fetchAllNinjaPrices(game, league);
+  let rows: NinjaFetchedItem[];
+  let divineRate: number;
+  if (game === "poe2") {
+    const result = await fetchAllPoe2Prices(league);
+    if (result == null) {
+      // poe.ninja lists the league (indexed: true) but has not priced it
+      // yet — the pre-launch gap between announcement and first trades.
+      // Skip cleanly so the run stays green; it self-heals once the feed
+      // populates, with no code change.
+      console.log(
+        `${game}/${league}: listed on poe.ninja but not priced yet (pre-launch) — skipping.`,
+      );
+      return { upserted: 0, divineRate: 0 };
+    }
+    ({ rows, divineRate } = result);
+  } else {
+    ({ rows, divineRate } = await fetchAllNinjaPrices(game, league));
+  }
 
   if (rows.length === 0) {
     throw new Error(`No items fetched for ${game}/${league} — poe.ninja may be down`);

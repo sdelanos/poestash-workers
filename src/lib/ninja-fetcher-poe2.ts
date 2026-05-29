@@ -37,16 +37,31 @@ interface RateInfo {
 }
 
 /** Fetch the divine→chaos rate for a PoE 2 league. Throws if poe.ninja
- *  is down, the response is malformed, or the rate can't be determined.
+ *  is down or the response is malformed. Returns `null` when poe.ninja
+ *  lists the league but has not priced it yet (the pre-launch window — see
+ *  below); the caller treats that as a clean skip.
  *  Critical because every PoE 2 chaos value depends on this rate — unlike
  *  PoE 1 where chaos values come straight from the response. */
-async function getRateInfo(league: string): Promise<RateInfo> {
+async function getRateInfo(league: string): Promise<RateInfo | null> {
   const url = `${NINJA_BASE}/exchange/current/overview?league=${encodeURIComponent(league)}&type=Currency`;
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`poe.ninja Currency fetch ${res.status}: ${res.statusText}`);
   }
   const data = (await res.json()) as NinjaExchangeResponse;
+
+  // poe.ninja flags a new league `indexed: true` in index-state the moment
+  // it is announced, but the economy feed stays empty until the first trades
+  // land. That pre-launch window returns primary "chaos", empty rates, and
+  // zero items — no divine rate exists yet because nothing has been sold.
+  // Treat it as "not priced yet" (null) rather than a malformed response: it
+  // self-heals the instant real trades populate the feed, with no code change.
+  const hasItems = (data.items?.length ?? 0) > 0;
+  const hasChaosRate = (data.core?.rates?.chaos ?? 0) > 0;
+  if (!hasItems && !hasChaosRate) {
+    return null;
+  }
+
   const primary = data.core?.primary;
 
   if (primary === "divine") {
@@ -215,10 +230,13 @@ async function fetchItemCategory(
 
 export async function fetchAllPoe2Prices(
   league: string,
-): Promise<{ rows: NinjaFetchedItem[]; divineRate: number }> {
+): Promise<{ rows: NinjaFetchedItem[]; divineRate: number } | null> {
   // Rate must succeed before we touch categories — every chaos value
   // depends on it, unlike PoE 1 where chaos values are independent.
+  // `null` means poe.ninja lists the league but has not priced it yet
+  // (pre-launch); propagate that so the caller skips it cleanly.
   const rate = await getRateInfo(league);
+  if (rate == null) return null;
 
   const results = await Promise.all(
     POE2_CATEGORIES.map((cat) =>
