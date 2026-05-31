@@ -12,12 +12,12 @@
  *
  * Differences from PoE 1 worth knowing:
  *   - URL base is `/poe2/api/economy` (vs `/poe1/`).
- *   - Primary denomination on responses is **divine**, not chaos. The
- *     `primaryValue` for a row is the price in divines. We multiply by
- *     `core.rates.chaos` (chaos-per-divine) to populate the canonical
- *     `chaosValue` schema column, then derive `divineValue` from chaos
- *     using the same rate, matching the PoE 1 semantics. Both feeds share
- *     the one divine rate fetched up front from Currency.
+ *   - `primaryValue` denomination is NOT fixed: poe.ninja flip-flops PoE 2's
+ *     `core.primary` between "divine" and "exalted" (and could pick "chaos").
+ *     We read `core.rates.chaos` (chaos per primary unit) to convert every
+ *     row's `primaryValue` into the canonical `chaosValue` schema column, then
+ *     derive `divineValue` from chaos. See `getRateInfo` for the full math.
+ *     Both feeds share the one rate fetched up front from Currency.
  */
 
 import type { NinjaExchangeResponse, NinjaFetchedItem } from "./ninja-types";
@@ -29,11 +29,11 @@ const POECDN_BASE = "https://web.poecdn.com";
 interface RateInfo {
   /** Chaos per divine. The canonical "divineRate" used across the app. */
   divineRate: number;
-  /** True when poe.ninja's response denominates `primaryValue` in divines
-   *  (the PoE 2 default as of 2026-05). False would mean primary is chaos,
-   *  matching PoE 1 conventions. We support both because conventions can
-   *  shift, but we always require a non-zero divine rate either way. */
-  primaryIsDivine: boolean;
+  /** Chaos per one unit of whatever currency poe.ninja denominated
+   *  `primaryValue` in. Multiply any row's `primaryValue` by this to get its
+   *  chaos value. Denomination-agnostic: it is `rates.chaos` for a divine- or
+   *  exalted-primary response, and `1` when primary already is chaos. */
+  chaosRatio: number;
 }
 
 /** Fetch the divine→chaos rate for a PoE 2 league. Throws if poe.ninja
@@ -62,30 +62,42 @@ async function getRateInfo(league: string): Promise<RateInfo | null> {
     return null;
   }
 
+  // Denomination-agnostic. poe.ninja flip-flops PoE 2's `core.primary` between
+  // "divine" and "exalted" (and could pick "chaos" to match PoE 1), so we never
+  // hardcode which currency `primaryValue` is in. Two facts cover every case:
+  //   - chaos per 1 primary unit  -> `rates.chaos` (1 when primary is chaos)
+  //   - chaos per divine          -> Divine Orb's price-in-primary * the above
+  // When primary is "divine", Divine's price-in-primary is 1, so divineRate
+  // collapses back to `rates.chaos` exactly as before. No new league denom can
+  // throw here as long as a chaos rate exists.
   const primary = data.core?.primary;
+  const rates = data.core?.rates ?? {};
 
-  if (primary === "divine") {
-    // `rates.chaos` is chaos-per-primary. Primary is divine, so this is
-    // chaos-per-divine, matching the canonical `divineRate` semantics.
-    const divineRate = data.core?.rates?.chaos ?? 0;
-    if (divineRate <= 0) {
-      throw new Error(`poe.ninja returned non-positive chaos rate (${divineRate}) for ${league}`);
-    }
-    return { divineRate, primaryIsDivine: true };
+  const chaosRatio = primary === "chaos" ? 1 : rates.chaos ?? 0;
+  if (chaosRatio <= 0) {
+    throw new Error(
+      `No chaos rate in poe.ninja response for ${league} (primary="${primary ?? "(missing)"}")`,
+    );
   }
 
-  if (primary === "chaos") {
-    // Fallback: if poe.ninja ever flips PoE 2's primary to chaos (matching
-    // PoE 1), find Divine Orb's price the PoE 1 way.
-    const idx = data.items?.findIndex((i) => i.name === "Divine Orb") ?? -1;
-    const divineRate = idx >= 0 ? data.lines?.[idx]?.primaryValue ?? 0 : 0;
-    if (divineRate <= 0) {
-      throw new Error(`Divine Orb price not found in chaos-primary response for ${league}`);
-    }
-    return { divineRate, primaryIsDivine: false };
+  const divineInPrimary =
+    primary === "divine" ? 1 : findPrimaryValue(data, "Divine Orb");
+  const divineRate = divineInPrimary * chaosRatio;
+  if (divineRate <= 0) {
+    throw new Error(
+      `Could not derive divine rate for ${league} (primary="${primary ?? "(missing)"}")`,
+    );
   }
 
-  throw new Error(`Unrecognized core.primary "${primary ?? "(missing)"}" in poe.ninja response for ${league}`);
+  return { divineRate, chaosRatio };
+}
+
+/** Look up one item's `primaryValue` by display name. `lines` and `items` are
+ *  index-aligned in poe.ninja's exchange feed, so we match the item then read
+ *  the line at the same index. Returns 0 when the item is absent. */
+function findPrimaryValue(data: NinjaExchangeResponse, name: string): number {
+  const idx = data.items?.findIndex((i) => i.name === name) ?? -1;
+  return idx >= 0 ? data.lines?.[idx]?.primaryValue ?? 0 : 0;
 }
 
 /** Fetch one PoE 2 category. Tolerates per-category failures (404, empty
@@ -103,7 +115,7 @@ async function fetchCategory(
   const data = (await res.json()) as NinjaExchangeResponse;
   if (!data.lines?.length || !data.items?.length) return [];
 
-  const chaosRatio = rate.primaryIsDivine ? rate.divineRate : 1;
+  const chaosRatio = rate.chaosRatio;
   const out: NinjaFetchedItem[] = [];
 
   for (let i = 0; i < data.lines.length; i++) {
@@ -190,7 +202,7 @@ async function fetchItemCategory(
   const data = (await res.json()) as Poe2ItemResponse;
   if (!data.lines?.length) return [];
 
-  const chaosRatio = rate.primaryIsDivine ? rate.divineRate : 1;
+  const chaosRatio = rate.chaosRatio;
   const out: NinjaFetchedItem[] = [];
 
   for (const line of data.lines) {
