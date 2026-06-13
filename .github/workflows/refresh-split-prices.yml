@@ -1,0 +1,32 @@
+name: Refresh Split Prices
+on:
+  schedule:
+    # Every 6h — each run processes markets oldest-first until timeout.
+    # Full universe (~2,500 markets x 2 sides) clears over ~1-2 days, then
+    # value pruning keeps steady-state runs short.
+    - cron: '23 */6 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: split-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      POE_CLIENT_ID: ${{ secrets.POE_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Refresh split prices
+        run: npm run refresh:splits

@@ -2,14 +2,16 @@
   "name": "poestash-workers",
   "version": "1.0.0",
   "private": true,
-  "description": "Background workers for poestash: ninja prices + cluster jewel combo prices.",
+  "description": "Background workers for poestash: ninja prices + cluster jewel combo prices + split base prices.",
   "scripts": {
     "refresh:clusters": "tsx src/refresh-cluster-prices.ts",
     "refresh:ninja": "tsx src/refresh-ninja-prices.ts",
     "refresh:ninja:poe2": "tsx src/refresh-ninja-prices.ts auto poe2",
     "refresh:gem-usage": "tsx src/refresh-gem-usage.ts",
     "refresh:temple": "tsx src/refresh-temple-prices.ts",
-    "refresh:leagues": "tsx src/refresh-leagues.ts"
+    "refresh:splits": "tsx src/refresh-split-prices.ts",
+    "refresh:leagues": "tsx src/refresh-leagues.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "dotenv": "^17.3.1",
@@ -18,6 +20,7 @@
   "devDependencies": {
     "@types/node": "^25.5.2",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.5"
   }
 }
