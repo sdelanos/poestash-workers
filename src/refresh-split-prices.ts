@@ -191,7 +191,9 @@ interface MarketState {
   base: SplitBase;
   band: SplitQualityBandDef;
   lastRefreshedAt: Date | null;
-  /** Last sampled split floor, for value pruning. */
+  /** Last sampled clean + split floors, for value pruning. The resale floor
+   *  the app surfaces on is min(clean, split), so the pruning mirrors that. */
+  cleanPriceChaos: number | null;
   splitPriceChaos: number | null;
 }
 
@@ -236,18 +238,34 @@ async function main() {
   if (beast) costs.push(beast);
   if (fossil && resonator) costs.push(fossil + resonator);
   const splitCost = costs.length ? Math.min(...costs) : 80;
+  if (costs.length === 0) {
+    console.warn(
+      `WARN: no split-ingredient prices in ninja_prices for ${league}; ` +
+        `falling back to ${splitCost}c for value pruning (cadence only, not stored).`,
+    );
+  }
   console.log(`Split cost estimate: ${splitCost.toFixed(0)}c (divine=${currencyToChaos.get("divine")?.toFixed(0)}c)`);
 
   // Existing rows for staleness + value pruning.
   const existing = await sql<
-    { base_type: string; quality_band: number; split_price_chaos: number | null; last_refreshed_at: Date | null }[]
+    {
+      base_type: string;
+      quality_band: number;
+      clean_price_chaos: number | null;
+      split_price_chaos: number | null;
+      last_refreshed_at: Date | null;
+    }[]
   >`
-    SELECT base_type, quality_band, split_price_chaos, last_refreshed_at
+    SELECT base_type, quality_band, clean_price_chaos, split_price_chaos, last_refreshed_at
     FROM split_base_prices WHERE league = ${league}
   `;
-  const stateByKey = new Map<string, { split: number | null; at: Date | null }>();
+  const stateByKey = new Map<string, { clean: number | null; split: number | null; at: Date | null }>();
   for (const r of existing) {
-    stateByKey.set(`${r.base_type}|${r.quality_band}`, { split: r.split_price_chaos, at: r.last_refreshed_at });
+    stateByKey.set(`${r.base_type}|${r.quality_band}`, {
+      clean: r.clean_price_chaos,
+      split: r.split_price_chaos,
+      at: r.last_refreshed_at,
+    });
   }
 
   // Full universe = bases x bands. DB base_type is the lowercased name (what
@@ -256,16 +274,34 @@ async function main() {
   for (const base of BASES) {
     for (const band of SPLIT_QUALITY_BANDS) {
       const st = stateByKey.get(`${base.name.toLowerCase()}|${band.key}`);
-      markets.push({ base, band, lastRefreshedAt: st?.at ?? null, splitPriceChaos: st?.split ?? null });
+      markets.push({
+        base,
+        band,
+        lastRefreshedAt: st?.at ?? null,
+        cleanPriceChaos: st?.clean ?? null,
+        splitPriceChaos: st?.split ?? null,
+      });
     }
   }
 
-  // Due if never sampled; viable markets (split floor can clear the cost)
-  // refresh every 24h, the rest every 72h.
+  // Due if never sampled; viable markets refresh every 24h, the rest every
+  // 72h. "Viable" mirrors the app's surfacing rule exactly: the resale floor,
+  // min(clean, split), must beat the split cost. Using min keeps a base whose
+  // only cheap side is clean from being mis-rotated by a high crafted-rare
+  // split price (and vice versa).
   const now = Date.now();
   const FRESH_VIABLE = 24 * 3600_000;
   const FRESH_DEAD = 72 * 3600_000;
-  const isViable = (m: MarketState) => m.splitPriceChaos != null && 2 * m.splitPriceChaos >= splitCost;
+  const resaleFloor = (m: MarketState): number | null => {
+    const sides = [m.cleanPriceChaos, m.splitPriceChaos].filter(
+      (v): v is number => v != null && v > 0,
+    );
+    return sides.length ? Math.min(...sides) : null;
+  };
+  const isViable = (m: MarketState) => {
+    const r = resaleFloor(m);
+    return r != null && r > splitCost;
+  };
   const isDue = (m: MarketState) => {
     if (!m.lastRefreshedAt) return true;
     const age = now - m.lastRefreshedAt.getTime();

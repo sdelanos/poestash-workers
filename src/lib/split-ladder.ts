@@ -1,14 +1,20 @@
 /**
  * Ladder pricing for split-base sampling. Pure functions, no IO, so they are
  * unit-testable in isolation. Given the cheapest few trade listings (already
- * converted to chaos), this returns the real market floor with junk
- * price-fixing outliers trimmed off the bottom.
+ * converted to chaos), this returns a robust market floor: junk price-fixing
+ * outliers trimmed off the bottom, then a low-quartile pick rather than the
+ * single cheapest listing.
  *
  * Why trim: a quality base ladder routinely starts with a 1c "noise" listing
- * (mispriced, bait, or a typo) sitting under the real 30-divine floor. Taking
- * the raw minimum would make every threshold fantasy. We drop a leading
- * listing only when it is a small fraction of the next one up, which is the
- * signature of junk rather than a genuinely cheap real listing.
+ * (mispriced, bait, or a typo) sitting under the real floor. We drop a leading
+ * listing only when it is a small fraction of the next one up, the signature
+ * of junk rather than a genuinely cheap real listing.
+ *
+ * Why a low quartile rather than the absolute minimum: a single dumped listing
+ * shouldn't define the whole market floor. After trimming junk, we take the
+ * lower-quartile listing of the cheapest sample, which reflects the cheap
+ * cluster a buyer actually competes with. With only a couple of listings this
+ * collapses back to the cheapest, which is the honest answer for a thin market.
  */
 
 /** A listing's price split into amount + trade-API currency slug. */
@@ -50,18 +56,25 @@ export function trimLadder(prices: number[]): number[] {
   return sorted.slice(start);
 }
 
+/** Lower-quartile index of an n-length sorted list. n=1..4 -> 0, n=5 -> 1,
+ *  n=10 -> 2. Resists a single outlier without drifting toward the median. */
+function lowQuartileIndex(n: number): number {
+  return Math.floor((n - 1) * 0.25);
+}
+
 /**
- * The trimmed market floor: the cheapest listing once junk is removed.
- * Returns null when there are no usable listings.
+ * The robust market floor: trim junk, then take the low-quartile listing of
+ * what remains. Returns null when there are no usable listings.
  */
-export function floorPrice(prices: number[]): number | null {
+export function robustFloor(prices: number[]): number | null {
   const trimmed = trimLadder(prices);
-  return trimmed.length > 0 ? trimmed[0] : null;
+  if (trimmed.length === 0) return null;
+  return trimmed[lowQuartileIndex(trimmed.length)];
 }
 
 /**
  * End-to-end: take raw listing prices, convert each to chaos, trim junk, and
- * return the floor. Listings in unknown currencies are dropped.
+ * return the robust floor. Listings in unknown currencies are dropped.
  */
 export function ladderFloorChaos(
   listings: ListingPrice[],
@@ -70,5 +83,5 @@ export function ladderFloorChaos(
   const chaos = listings
     .map((l) => toChaos(l, currencyToChaos))
     .filter((v): v is number => v != null);
-  return floorPrice(chaos);
+  return robustFloor(chaos);
 }

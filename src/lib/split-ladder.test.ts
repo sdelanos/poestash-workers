@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toChaos, trimLadder, floorPrice, ladderFloorChaos } from "./split-ladder";
+import { toChaos, trimLadder, robustFloor, ladderFloorChaos } from "./split-ladder";
 
 const rates = new Map<string, number>([
   ["chaos", 1],
@@ -59,13 +59,25 @@ describe("trimLadder", () => {
   });
 });
 
-describe("floorPrice", () => {
-  it("returns the trimmed floor, not the raw minimum", () => {
-    expect(floorPrice([2, 6800, 9000])).toBe(6800);
+describe("robustFloor", () => {
+  it("trims junk before taking the floor", () => {
+    expect(robustFloor([2, 6800, 9000])).toBe(6800);
   });
+
+  it("takes the low quartile, not the absolute minimum, on a deep ladder", () => {
+    // 8 listings, no junk to trim. Lower-quartile index = floor(7*0.25) = 1,
+    // so a single 20c dump under the cluster doesn't define the floor.
+    expect(robustFloor([20, 25, 50, 75, 100, 100, 100, 100])).toBe(25);
+  });
+
+  it("collapses to the cheapest on a thin market", () => {
+    expect(robustFloor([200])).toBe(200);
+    expect(robustFloor([200, 250])).toBe(200); // n=2 -> index 0
+  });
+
   it("returns null when there are no usable listings", () => {
-    expect(floorPrice([])).toBeNull();
-    expect(floorPrice([0, -1])).toBeNull();
+    expect(robustFloor([])).toBeNull();
+    expect(robustFloor([0, -1])).toBeNull();
   });
 });
 
