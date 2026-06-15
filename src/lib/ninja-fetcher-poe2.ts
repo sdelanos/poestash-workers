@@ -34,6 +34,12 @@ interface RateInfo {
    *  chaos value. Denomination-agnostic: it is `rates.chaos` for a divine- or
    *  exalted-primary response, and `1` when primary already is chaos. */
   chaosRatio: number;
+  /** Exalted per one primary unit. Multiply any row's `primaryValue` by this
+   *  to get its price in Exalted Orbs (the PoE 2 economy's Exalted column).
+   *  `rates.exalted` straight from poe.ninja's `core` block for a divine- or
+   *  chaos-primary response, `1` when primary is already exalted, and `0` when
+   *  poe.ninja omits the exalted rate (the column then renders blank). */
+  exaltedRatio: number;
 }
 
 /** Fetch the divine→chaos rate for a PoE 2 league. Throws if poe.ninja
@@ -89,7 +95,14 @@ async function getRateInfo(league: string): Promise<RateInfo | null> {
     );
   }
 
-  return { divineRate, chaosRatio };
+  // Exalted per primary unit, straight from poe.ninja's `core.rates` table
+  // (e.g. `{ exalted: 183.7, chaos: 11.23 }` for a divine-primary response).
+  // Missing rate -> 0, which leaves each row's exaltedValue null. Not fatal:
+  // the Exalted column simply renders blank, unlike the load-bearing divine
+  // rate above.
+  const exaltedRatio = primary === "exalted" ? 1 : rates.exalted ?? 0;
+
+  return { divineRate, chaosRatio, exaltedRatio };
 }
 
 /** Look up one item's `primaryValue` by display name. `lines` and `items` are
@@ -134,6 +147,8 @@ async function fetchCategory(
 
     const chaosValue = line.primaryValue * chaosRatio;
     const divineValue = chaosValue / rate.divineRate;
+    const exaltedValue =
+      rate.exaltedRatio > 0 ? line.primaryValue * rate.exaltedRatio : null;
 
     out.push({
       game: "poe2",
@@ -141,6 +156,7 @@ async function fetchCategory(
       itemName: item.name.toLowerCase(),
       chaosValue,
       divineValue,
+      exaltedValue,
       listingCount: 0,
       source: "exchange",
       ninjaCategory: apiType,
@@ -172,6 +188,10 @@ interface Poe2ItemLine {
   corrupted?: boolean;
   sparkLine?: { totalChange: number; data: (number | null)[] };
   explicitModifiers?: { text: string; optional: boolean }[];
+  implicitModifiers?: { text: string; optional: boolean }[];
+  propertyModifiers?: { text: string; optional?: boolean }[];
+  requirementModifiers?: { text: string; optional?: boolean }[];
+  flavourText?: string | string[];
 }
 
 interface Poe2ItemResponse {
@@ -186,6 +206,17 @@ function cleanModText(text: string): string {
   return text
     .replace(/\[[^\]|]+\|([^\]]+)\]/g, "$1")
     .replace(/\[([^\]]+)\]/g, "$1");
+}
+
+/** Clean wiki markup off flavour text and normalize to non-empty lines. */
+function cleanFlavour(raw: string | string[] | null | undefined): string[] | null {
+  if (!raw) return null;
+  const text = Array.isArray(raw) ? raw.join("\n") : raw;
+  const lines = text
+    .split(/\r\n|\r|\n/)
+    .map((s) => cleanModText(s).trim())
+    .filter(Boolean);
+  return lines.length ? lines : null;
 }
 
 /** Fetch one PoE 2 named-item category (uniques). Same per-category
@@ -210,6 +241,8 @@ async function fetchItemCategory(
 
     const chaosValue = line.primaryValue * chaosRatio;
     const divineValue = chaosValue / rate.divineRate;
+    const exaltedValue =
+      rate.exaltedRatio > 0 ? line.primaryValue * rate.exaltedRatio : null;
 
     out.push({
       game: "poe2",
@@ -217,6 +250,7 @@ async function fetchItemCategory(
       itemName: line.name.toLowerCase(),
       chaosValue,
       divineValue,
+      exaltedValue,
       listingCount: line.listingCount ?? 0,
       // PoE 2 uniques have a single source on poe.ninja (the named-item
       // feed), so "stash" is their canonical source — same as PoE 1 uniques.
@@ -234,6 +268,16 @@ async function fetchItemCategory(
           text: cleanModText(m.text),
           optional: m.optional,
         })) ?? null,
+      implicitModifiers:
+        line.implicitModifiers?.map((m) => ({
+          text: cleanModText(m.text),
+          optional: m.optional,
+        })) ?? null,
+      flavourText: cleanFlavour(line.flavourText),
+      propertyModifiers:
+        line.propertyModifiers?.map((m) => ({ text: cleanModText(m.text) })) ?? null,
+      requirementModifiers:
+        line.requirementModifiers?.map((m) => ({ text: cleanModText(m.text) })) ?? null,
     });
   }
 

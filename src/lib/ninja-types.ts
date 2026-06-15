@@ -142,6 +142,9 @@ export interface NinjaItemLine {
   corrupted?: boolean;
   stackSize?: number;
   mutatedModifiers?: { text: string; optional: boolean }[];
+  // PoE 2 uniques carry these extra blocks on the named-item feed.
+  propertyModifiers?: { text: string; optional?: boolean }[];
+  requirementModifiers?: { text: string; optional?: boolean }[];
   tradeInfo?: { mod: string; min: number; max: number }[];
 }
 
@@ -213,4 +216,9 @@ export interface NinjaFetchedItem {
   count?: number | null;
   volume?: number | null;
   mutatedModifiers?: { text: string; optional: boolean; statId?: string }[] | null;
+  // Tooltip source fields (uniques only). flavourText is normalized to lines.
+  implicitModifiers?: { text: string; optional?: boolean }[] | null;
+  flavourText?: string[] | null;
+  propertyModifiers?: { text: string }[] | null;
+  requirementModifiers?: { text: string }[] | null;
 }

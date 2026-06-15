@@ -14,6 +14,20 @@ import {
 const NINJA_BASE = "https://poe.ninja/poe1/api/economy";
 const POECDN_BASE = "https://web.poecdn.com";
 
+/** poe.ninja serves flavour as either a single string or a string[] depending
+ *  on the feed; normalize to trimmed, non-empty lines for the tooltip card. */
+function normalizeFlavour(
+  raw: string | string[] | null | undefined,
+): string[] | null {
+  if (!raw) return null;
+  const text = Array.isArray(raw) ? raw.join("\n") : raw;
+  const lines = text
+    .split(/\r\n|\r|\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return lines.length ? lines : null;
+}
+
 // ---------------------------------------------------------------------------
 // Stash: currency-format endpoint (Currency, Fragment)
 // ---------------------------------------------------------------------------
@@ -88,6 +102,8 @@ async function fetchStashItems(
     totalChange: line.sparkLine?.totalChange ?? null,
     stackSize: line.stackSize ?? null,
     explicitModifiers: line.explicitModifiers ?? null,
+    implicitModifiers: line.implicitModifiers ?? null,
+    flavourText: normalizeFlavour(line.flavourText),
     variant: line.variant ?? null,
     baseType: line.baseType ?? null,
     links: line.links ?? null,

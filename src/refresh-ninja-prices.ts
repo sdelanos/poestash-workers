@@ -54,7 +54,9 @@ const COLUMNS = [
   "sparkline_data", "total_change", "stack_size", "explicit_modifiers",
   "variant", "base_type", "links", "item_class", "item_type",
   "corrupted", "gem_level", "gem_quality", "level_required",
-  "exalted_value", "count", "volume", "mutated_modifiers", "updated_at",
+  "exalted_value", "count", "volume", "mutated_modifiers",
+  "flavour_text", "implicit_modifiers", "property_modifiers", "requirement_modifiers",
+  "updated_at",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -99,6 +101,10 @@ function toDbRow(row: NinjaFetchedItem, now: Date) {
     count: row.count ?? null,
     volume: row.volume ?? null,
     mutated_modifiers: row.mutatedModifiers ?? null,
+    flavour_text: row.flavourText ?? null,
+    implicit_modifiers: row.implicitModifiers ?? null,
+    property_modifiers: row.propertyModifiers ?? null,
+    requirement_modifiers: row.requirementModifiers ?? null,
     updated_at: now,
   };
 }
@@ -196,6 +202,10 @@ async function refreshOneLeague(
         count = EXCLUDED.count,
         volume = EXCLUDED.volume,
         mutated_modifiers = EXCLUDED.mutated_modifiers,
+        flavour_text = EXCLUDED.flavour_text,
+        implicit_modifiers = EXCLUDED.implicit_modifiers,
+        property_modifiers = EXCLUDED.property_modifiers,
+        requirement_modifiers = EXCLUDED.requirement_modifiers,
         updated_at = EXCLUDED.updated_at
     `;
 
