@@ -44,12 +44,13 @@ export const POE2_CATEGORIES: Poe2Category[] = [
   { label: "Lineage Gems",    slug: "lineage-support-gems", apiType: "LineageSupportGems",  view: "exchange" },
   { label: "Essences",        slug: "essences",             apiType: "Essences",            view: "exchange" },
   { label: "Soul Cores",      slug: "soul-cores",           apiType: "SoulCores",           view: "exchange" },
-  { label: "Idols",           slug: "idols",                apiType: "Idol",                view: "exchange" },
+  { label: "Idols",           slug: "idols",                apiType: "Idols",               view: "exchange" },
   { label: "Runes",           slug: "runes",                apiType: "Runes",               view: "exchange" },
   { label: "Omens",           slug: "omens",                apiType: "Ritual",              view: "exchange" },
   { label: "Expedition",      slug: "expedition",           apiType: "Expedition",          view: "exchange" },
   { label: "Liquid Emotions", slug: "liquid-emotions",      apiType: "Delirium",            view: "exchange" },
   { label: "Catalysts",       slug: "breach-catalyst",      apiType: "Breach",              view: "exchange" },
+  { label: "Verisium",        slug: "verisium",             apiType: "Verisium",            view: "exchange" },
   // EQUIPMENT — named-item feed. Verified 2026-05-27 against poe.ninja's
   // PoE 2 metadata: types are PLURAL (UniqueWeapons, not UniqueWeapon) and
   // Relics use "UniqueSanctumRelics". Don't "correct" them to the PoE 1
@@ -60,6 +61,8 @@ export const POE2_CATEGORIES: Poe2Category[] = [
   { label: "Unique Flasks",      slug: "unique-flasks",      apiType: "UniqueFlasks",        view: "item" },
   { label: "Unique Charms",      slug: "unique-charms",      apiType: "UniqueCharms",        view: "item" },
   { label: "Unique Jewels",      slug: "unique-jewels",      apiType: "UniqueJewels",        view: "item" },
-  { label: "Unique Maps",        slug: "unique-maps",        apiType: "UniqueMaps",          view: "item" },
   { label: "Unique Relics",      slug: "unique-relics",      apiType: "UniqueSanctumRelics", view: "item" },
+  // ATLAS — named-item feed. Tablet types are PLURAL.
+  { label: "Unique Tablets",    slug: "unique-tablets",    apiType: "UniqueTablets",    view: "item" },
+  { label: "Precursor Tablets", slug: "precursor-tablets", apiType: "PrecursorTablets", view: "item" },
 ];

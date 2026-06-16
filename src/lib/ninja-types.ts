@@ -16,6 +16,7 @@ export const ALL_NINJA_TYPES = [
   "Fragment",
   "DivinationCard",
   "SkillGem",
+  "ImbuedGem",
   "UniqueWeapon",
   "UniqueArmour",
   "UniqueAccessory",
