@@ -74,8 +74,32 @@ async function getServiceToken(
   return json.access_token;
 }
 
-async function fetchLeagues(token: string, realmParam: string): Promise<PoeLeague[]> {
-  const url = `${API_BASE}/league?type=main&realm=${encodeURIComponent(realmParam)}`;
+/** Standalone events (Return-of-the-Ancestors-style) live under type=event,
+ *  not type=main. Merge them in, but only while live, so the selector shows
+ *  the event's league forks without pulling in past or upcoming races. Main
+ *  wins on id collision. Duplicated in the app (lib/poe/api.ts) because the
+ *  two repos can't import each other. */
+function mergeActiveEvents(
+  main: PoeLeague[],
+  events: PoeLeague[],
+): PoeLeague[] {
+  const now = Date.now();
+  const seen = new Set(main.map((l) => l.id));
+  const active = events.filter((l) => {
+    if (seen.has(l.id) || !l.startAt) return false;
+    const started = Date.parse(l.startAt) <= now;
+    const ended = l.endAt ? Date.parse(l.endAt) <= now : false;
+    return started && !ended;
+  });
+  return [...main, ...active];
+}
+
+async function fetchLeaguesOfType(
+  token: string,
+  realmParam: string,
+  type: "main" | "event",
+): Promise<PoeLeague[]> {
+  const url = `${API_BASE}/league?type=${type}&realm=${encodeURIComponent(realmParam)}`;
   const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -91,6 +115,24 @@ async function fetchLeagues(token: string, realmParam: string): Promise<PoeLeagu
   }
   const data = (await res.json()) as { leagues: PoeLeague[] };
   return data.leagues ?? [];
+}
+
+async function fetchLeagues(token: string, realmParam: string): Promise<PoeLeague[]> {
+  // type=main is load-bearing for the selector, so it throws on failure. The
+  // type=event call is best-effort: a flaky response just means no live event
+  // merges this cycle, never a broken main list. We merge BEFORE main() trims
+  // to {id, startAt} so the active-window filter can still read endAt.
+  const events = await fetchLeaguesOfType(token, realmParam, "event").catch(
+    (err) => {
+      console.error(
+        `[leagues] type=event fetch failed for realm=${realmParam}:`,
+        err instanceof Error ? err.message : err,
+      );
+      return [] as PoeLeague[];
+    },
+  );
+  const main = await fetchLeaguesOfType(token, realmParam, "main");
+  return mergeActiveEvents(main, events);
 }
 
 async function main() {
