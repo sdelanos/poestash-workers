@@ -28,19 +28,9 @@ jobs:
 
       - run: npm ci
 
-      # Each league step is `continue-on-error: true` so a transient
-      # poe.ninja 404 on one variant (low-pop HC, etc.) doesn't kill
-      # the whole run. The script itself exits 0 for missing-snapshot
-      # cases — this is just belt-and-suspenders.
-
-      - name: Refresh gem usage (Mirage)
-        run: npx tsx src/refresh-gem-usage.ts "Mirage"
-        continue-on-error: true
-
-      - name: Refresh gem usage (Hardcore Mirage)
-        run: npx tsx src/refresh-gem-usage.ts "Hardcore Mirage"
-        continue-on-error: true
-
-      - name: Refresh gem usage (Standard)
-        run: npx tsx src/refresh-gem-usage.ts "Standard"
-        continue-on-error: true
+      # Discovers the leagues poe.ninja tracks builds for, reduces them to the
+      # priced set (Standard + the challenge league and its HC variant), and
+      # refreshes each. A missing/low-population snapshot on one league is
+      # skipped inside the script; only a genuine poe.ninja outage fails.
+      - name: Refresh gem usage (auto)
+        run: npx tsx src/refresh-gem-usage.ts

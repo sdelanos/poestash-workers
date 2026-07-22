@@ -8,6 +8,11 @@
  * Usage:
  *   npx tsx src/refresh-temple-prices.ts [league]
  *
+ * With no league argument the worker prices every league poe.ninja currently
+ * tracks (read from `ninja_price_meta`), so it follows league rollovers with no
+ * workflow edit and prices exactly the leagues the ninja worker has data for.
+ * Pass an explicit league name for an ad-hoc run.
+ *
  * Designed to run hourly via GitHub Actions cron. Each run does ONE search
  * call + ONE fetch call per (league, room) — currently 1 room (gem_room_3),
  * so 2 trade API calls per league per run. Well under the 30/300s ceiling.
@@ -178,24 +183,38 @@ function median(values: number[]): number | null {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// League resolution
 // ---------------------------------------------------------------------------
 
-async function main() {
-  const args = process.argv.slice(2);
-  const league = args.find((a) => !a.startsWith("--")) ?? "Mirage";
+/** The leagues to price: an explicit name for ad-hoc runs, else every PoE 1
+ *  league the ninja worker currently prices (read from `ninja_price_meta`).
+ *  That table already holds exactly the priced set, Standard, Hardcore, the
+ *  live challenge league + its HC variant, and follows rollovers on its own,
+ *  so temple tracks it without any league logic of its own. Empty (nothing
+ *  priced yet) is a clean skip, not a failure. */
+async function resolveLeagues(
+  sql: postgres.Sql,
+  explicit: string | undefined,
+): Promise<string[]> {
+  if (explicit) return [explicit];
 
-  if (!process.env.DATABASE_URL) {
-    console.error("DATABASE_URL is not set");
-    process.exit(1);
+  const rows = await sql<{ league: string }[]>`
+    SELECT DISTINCT league FROM ninja_price_meta WHERE game = 'poe1'
+  `;
+  const leagues = rows.map((r) => r.league);
+  if (leagues.length === 0) {
+    console.log("No PoE 1 leagues in ninja_price_meta yet, nothing to refresh.");
+  } else {
+    console.log(`Refreshing ${leagues.length} leagues: ${leagues.join(", ")}`);
   }
+  return leagues;
+}
 
-  const sql = postgres(process.env.DATABASE_URL, {
-    idle_timeout: 30,
-    max_lifetime: 300,
-    connect_timeout: 10,
-  });
+// ---------------------------------------------------------------------------
+// Per-league refresh
+// ---------------------------------------------------------------------------
 
+async function refreshLeague(sql: postgres.Sql, league: string): Promise<void> {
   const start = Date.now();
 
   // 1. Build currency conversion map (exchange source wins over stash).
@@ -278,6 +297,10 @@ async function main() {
           `median=${medianStr} min=${minStr}`,
       );
     } catch (err) {
+      // Trade-API errors are logged, not fatal. The trade API is flaky and
+      // heavily rate-limited, so a transient failure on one room must not fail
+      // the run. The last-known price stays in the table until the next tick.
+      // Only a DB/discovery error (outside this loop) fails the run loud.
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  ERROR on ${room.roomKey}: ${msg}`);
     }
@@ -285,8 +308,46 @@ async function main() {
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(`[${league}] Done in ${elapsed}s — ${updated}/${ROOMS.length} rooms updated`);
+}
 
-  await sql.end();
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main() {
+  const args = process.argv.slice(2);
+  const explicit = args.find((a) => !a.startsWith("--"));
+
+  if (!process.env.DATABASE_URL) {
+    console.error("DATABASE_URL is not set");
+    process.exit(1);
+  }
+
+  const sql = postgres(process.env.DATABASE_URL, {
+    idle_timeout: 30,
+    max_lifetime: 300,
+    connect_timeout: 10,
+  });
+
+  let firstError: unknown = null;
+
+  try {
+    const leagues = await resolveLeagues(sql, explicit);
+
+    for (const league of leagues) {
+      try {
+        await refreshLeague(sql, league);
+      } catch (err) {
+        console.error(`[${league}] failed:`, err instanceof Error ? err.message : err);
+        // Keep going so one bad league does not abort the rest of the refresh.
+        if (firstError == null) firstError = err;
+      }
+    }
+  } finally {
+    await sql.end();
+  }
+
+  if (firstError != null) process.exit(1);
 }
 
 main().catch((err) => {

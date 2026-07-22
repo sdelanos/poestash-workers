@@ -28,18 +28,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Refresh temple prices (Mirage)
-        continue-on-error: true
-        run: npx tsx src/refresh-temple-prices.ts "Mirage"
-
-      - name: Refresh temple prices (Hardcore Mirage)
-        continue-on-error: true
-        run: npx tsx src/refresh-temple-prices.ts "Hardcore Mirage"
-
-      - name: Refresh temple prices (Standard)
-        continue-on-error: true
-        run: npx tsx src/refresh-temple-prices.ts "Standard"
-
-      - name: Refresh temple prices (Hardcore)
-        continue-on-error: true
-        run: npx tsx src/refresh-temple-prices.ts "Hardcore"
+      # Prices every PoE 1 league the ninja worker currently tracks (read from
+      # ninja_price_meta): Standard, Hardcore, the live challenge league + its
+      # HC variant. Follows league rollovers with no workflow edit.
+      - name: Refresh temple prices (auto)
+        run: npx tsx src/refresh-temple-prices.ts

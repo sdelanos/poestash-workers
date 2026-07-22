@@ -26,14 +26,9 @@ jobs:
 
       - run: npm ci
 
-      - name: Refresh ultimatum prices (Mirage)
-        run: npx tsx src/refresh-ultimatum-prices.ts "Mirage"
-
-      - name: Refresh ultimatum prices (Hardcore Mirage)
-        run: npx tsx src/refresh-ultimatum-prices.ts "Hardcore Mirage"
-
-      - name: Refresh ultimatum prices (Standard)
-        run: npx tsx src/refresh-ultimatum-prices.ts "Standard"
-
-      - name: Refresh ultimatum prices (Hardcore)
-        run: npx tsx src/refresh-ultimatum-prices.ts "Hardcore"
+      # Discovers the priced set from poe.watch (Standard, Hardcore, the live
+      # challenge league + its HC variant) and refreshes each. Follows league
+      # rollovers with no workflow edit; a league poe.watch hasn't indexed is
+      # skipped, and only a genuine poe.watch outage fails the run.
+      - name: Refresh ultimatum prices (auto)
+        run: npx tsx src/refresh-ultimatum-prices.ts

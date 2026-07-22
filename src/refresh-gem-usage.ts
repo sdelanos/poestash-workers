@@ -5,16 +5,15 @@
  * Usage:
  *   npx tsx src/refresh-gem-usage.ts [league]
  *
- * Options:
- *   league   League name as it appears on poe.ninja (default: Mirage).
- *            Common targets: "Mirage", "Hardcore Mirage", "Standard".
- *            Note: poe.ninja does NOT track builds for permanent "Hardcore"
- *            (no snapshot exists). The worker logs a warning and exits 0
- *            in that case so the workflow still continues.
+ * With no league argument the worker discovers the leagues poe.ninja tracks
+ * builds for, reduces them to the priced set (Standard + the challenge league
+ * and its HC variant, poe.ninja keeps no permanent-Hardcore snapshot), and
+ * refreshes each, so it follows league rollovers with no workflow edit. Pass an
+ * explicit league name for an ad-hoc run.
  *
  * Designed to run every 6 hours via GitHub Actions cron. Each run fetches
- * three URLs from poe.ninja (~225 KB), decodes the protobuf, and upserts
- * ~800 rows into the `ninja_gem_usage` table for one league.
+ * three URLs from poe.ninja per league (~225 KB), decodes the protobuf, and
+ * upserts ~800 rows into the `ninja_gem_usage` table.
  *
  * Requires DATABASE_URL environment variable.
  */
@@ -26,6 +25,8 @@ import {
   listBuildLeagues,
   type GemUsageResult,
 } from "./lib/poeninja-builds";
+import { discoverPoe1Leagues } from "./lib/ninja-leagues";
+import { selectPricedSet } from "./lib/priced-set";
 
 const GAME = "poe1";
 
@@ -95,36 +96,20 @@ async function pruneStale(
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Per-league refresh
 // ---------------------------------------------------------------------------
 
-async function main() {
-  const requestedLeague = process.argv[2] || "Mirage";
+type BuildLeague = { url: string; name: string; version: string };
 
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    console.error("[gem-usage] DATABASE_URL is required");
-    process.exit(1);
-  }
-
-  // Look up the snapshot version for the requested league.
-  console.log(`[gem-usage] resolving snapshot for league=${requestedLeague}`);
-  const leagues = await listBuildLeagues();
-  const match = leagues.find((l) => l.name === requestedLeague);
-  if (!match) {
-    // Permanent leagues (Hardcore, SSF Standard, ...) don't always have
-    // build snapshots on poe.ninja. Don't fail the workflow for these —
-    // log and exit cleanly so the next league can run.
-    console.warn(
-      `[gem-usage] no build snapshot for league=${requestedLeague}, skipping. available: ${leagues
-        .map((l) => l.name)
-        .join(", ")}`,
-    );
-    return;
-  }
-
+/**
+ * Fetch, decode, and upsert one league's gem usage. Skips (returns without
+ * writing) when poe.ninja has no snapshot yet (404) or returns an
+ * implausibly small response, both are transient, not run-failing. Throws on
+ * a genuine poe.ninja error so the run fails loud.
+ */
+async function refreshOneLeague(sql: postgres.Sql, match: BuildLeague): Promise<void> {
   console.log(
-    `[gem-usage] snapshot version: ${match.version} (league url: ${match.url})`,
+    `[gem-usage] ${match.name}: snapshot version ${match.version} (url: ${match.url})`,
   );
 
   // Fetch + decode. Tolerate 404 — fresh snapshots can lag behind
@@ -138,7 +123,7 @@ async function main() {
     const msg = err instanceof Error ? err.message : String(err);
     if (/HTTP 404/.test(msg)) {
       console.warn(
-        `[gem-usage] snapshot ${match.version} for league=${requestedLeague} returned 404, skipping (likely a low-population variant or a stale index-state). ${msg}`,
+        `[gem-usage] snapshot ${match.version} for league=${match.name} returned 404, skipping (likely a low-population variant or a stale index-state). ${msg}`,
       );
       return;
     }
@@ -150,57 +135,133 @@ async function main() {
     0,
   );
   console.log(
-    `[gem-usage] decoded ${result.counts.size} gems, ${totalPlayers.toLocaleString()} total skill-gem usages, in ${fetchMs}ms`,
+    `[gem-usage] ${match.name}: decoded ${result.counts.size} gems, ${totalPlayers.toLocaleString()} total skill-gem usages, in ${fetchMs}ms`,
   );
 
   // Sanity guard: a too-small response usually means poe.ninja shipped a
-  // schema change or is mid-rebuild. Log + exit 0 without touching DB so
+  // schema change or is mid-rebuild. Log + skip without touching DB so
   // we don't accidentally wipe the table via the prune step.
   if (result.counts.size < MIN_PLAUSIBLE_GEM_COUNT) {
     console.warn(
-      `[gem-usage] decoded only ${result.counts.size} gems (< ${MIN_PLAUSIBLE_GEM_COUNT} threshold), skipping DB write to avoid pruning healthy data on a flaky response.`,
+      `[gem-usage] ${match.name}: decoded only ${result.counts.size} gems (< ${MIN_PLAUSIBLE_GEM_COUNT} threshold), skipping DB write to avoid pruning healthy data on a flaky response.`,
     );
     return;
   }
 
-  // Upsert
+  const now = new Date();
+  const upserted = await upsertGemUsage(
+    sql,
+    GAME,
+    result.league,
+    result.snapshotVersion,
+    result.counts,
+    now,
+  );
+  console.log(`[gem-usage] ${match.name}: upserted ${upserted} rows`);
+
+  const pruned = await pruneStale(sql, GAME, result.league, result.snapshotVersion);
+  console.log(`[gem-usage] ${match.name}: pruned ${pruned} stale rows`);
+}
+
+// ---------------------------------------------------------------------------
+// League resolution
+// ---------------------------------------------------------------------------
+
+/** The build snapshots to refresh: the one matching an explicit name for
+ *  ad-hoc runs, else the priced set for the current leagues.
+ *
+ *  Which leagues are *current* comes from poe.ninja's index-state
+ *  (`discoverPoe1Leagues`), not from the build-snapshot list, the latter is
+ *  historical and full of past challenge leagues and private leagues, so it
+ *  can't tell you which league is live. The build list is used only to look up
+ *  each current league's snapshot version. poe.ninja keeps no
+ *  permanent-Hardcore build snapshot, so that is dropped from the priced set. */
+async function resolveTargets(explicit: string | undefined): Promise<BuildLeague[]> {
+  const buildLeagues = await listBuildLeagues();
+
+  if (explicit) {
+    const match = buildLeagues.find((l) => l.name === explicit);
+    if (!match) {
+      console.warn(
+        `[gem-usage] no build snapshot for league=${explicit}, skipping. available: ${buildLeagues
+          .map((l) => l.name)
+          .join(", ")}`,
+      );
+      return [];
+    }
+    return [match];
+  }
+
+  const current = await discoverPoe1Leagues();
+  const wanted = selectPricedSet(
+    current.map((name) => ({ name })),
+    { includePermanentHardcore: false },
+  );
+
+  const targets: BuildLeague[] = [];
+  for (const name of wanted) {
+    const match = buildLeagues.find((l) => l.name === name);
+    if (!match) {
+      // A league can be indexed before its build snapshot lands. Skip it this
+      // run, the next one picks it up.
+      console.warn(`[gem-usage] ${name}: no build snapshot yet, skipping`);
+      continue;
+    }
+    targets.push(match);
+  }
+
+  if (targets.length === 0) {
+    console.log(
+      "[gem-usage] no priced build leagues right now (between leagues), nothing to refresh.",
+    );
+  } else {
+    console.log(
+      `[gem-usage] refreshing ${targets.length} leagues: ${targets.map((t) => t.name).join(", ")}`,
+    );
+  }
+  return targets;
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main() {
+  const explicit = process.argv.slice(2).find((a) => !a.startsWith("--"));
+
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    console.error("[gem-usage] DATABASE_URL is required");
+    process.exit(1);
+  }
+
+  const targets = await resolveTargets(explicit);
+  if (targets.length === 0) return;
+
   const sql = postgres(databaseUrl, {
     idle_timeout: 30,
     max_lifetime: 300,
   });
 
+  let firstError: unknown = null;
   try {
-    const now = new Date();
-
-    const upserted = await upsertGemUsage(
-      sql,
-      GAME,
-      result.league,
-      result.snapshotVersion,
-      result.counts,
-      now,
-    );
-    console.log(`[gem-usage] upserted ${upserted} rows`);
-
-    const pruned = await pruneStale(
-      sql,
-      GAME,
-      result.league,
-      result.snapshotVersion,
-    );
-    console.log(`[gem-usage] pruned ${pruned} stale rows`);
-
-    // Print top 10 for sanity
-    const top = Array.from(result.counts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
-    console.log(`[gem-usage] top 10:`);
-    for (const [name, count] of top) {
-      console.log(`  ${count.toLocaleString().padStart(8)}  ${name}`);
+    for (const match of targets) {
+      try {
+        await refreshOneLeague(sql, match);
+      } catch (err) {
+        console.error(
+          `[gem-usage] ${match.name} failed:`,
+          err instanceof Error ? err.message : err,
+        );
+        // Keep going so one bad league does not abort the rest of the refresh.
+        if (firstError == null) firstError = err;
+      }
     }
   } finally {
     await sql.end({ timeout: 5 });
   }
+
+  if (firstError != null) process.exit(1);
 }
 
 main().catch((err) => {
