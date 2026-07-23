@@ -1,0 +1,10 @@
+{
+  "Metadata/Items/Weapons/OneHandWeapons/Daggers/Dagger1": {
+    "name": "Glass Shank",
+    "item_class": "Dagger"
+  },
+  "Metadata/Items/Currency/CurrencyUpgradeToRare": {
+    "name": "Orb of Alchemy",
+    "item_class": "StackableCurrency"
+  }
+}

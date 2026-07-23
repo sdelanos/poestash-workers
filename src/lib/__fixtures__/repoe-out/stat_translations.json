@@ -1,0 +1,34 @@
+[
+  {
+    "English": [
+      {
+        "condition": [{ "min": 1, "max": null, "negated": null }],
+        "format": ["#"],
+        "index_handlers": [[]],
+        "string": "{0}% increased Attack Speed",
+        "reminder_text": null,
+        "is_markup": null
+      }
+    ],
+    "ids": ["attack_speed_+%"],
+    "trade_stats": [
+      { "id": "explicit.stat_210067635", "text": "#% increased Attack Speed", "type": "explicit", "option": null }
+    ],
+    "hidden": null
+  },
+  {
+    "English": [
+      {
+        "condition": [{ "min": 1, "max": null, "negated": null }],
+        "format": ["#"],
+        "index_handlers": [[]],
+        "string": "Grants Level {0} Something Hidden",
+        "reminder_text": null,
+        "is_markup": null
+      }
+    ],
+    "ids": ["local_display_hidden_stat"],
+    "trade_stats": null,
+    "hidden": true
+  }
+]

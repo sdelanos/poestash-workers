@@ -1,0 +1,8 @@
+{
+  "0": {
+    "id": "Kaom's Primacy",
+    "name": "卡歐姆的霸權",
+    "item_class": "Axe",
+    "visual_identity": { "dds_file": "Art/.../TwoHandAxe11Unique.dds", "id": "UniqueTwoHandAxe1" }
+  }
+}

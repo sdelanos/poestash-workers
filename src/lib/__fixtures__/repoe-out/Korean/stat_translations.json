@@ -1,0 +1,32 @@
+[
+  {
+    "ids": ["attack_speed_+%"],
+    "Korean": [
+      {
+        "condition": [{ "min": 1, "max": null, "negated": null }],
+        "format": ["#"],
+        "index_handlers": [[]],
+        "string": "공격 속도 {0}% 증가",
+        "reminder_text": null,
+        "is_markup": null
+      }
+    ],
+    "trade_stats": [
+      { "id": "explicit.stat_210067635", "text": "#% increased Attack Speed", "type": "explicit", "option": null }
+    ]
+  },
+  {
+    "ids": ["local_display_hidden_stat"],
+    "Korean": [
+      {
+        "condition": [{ "min": 1, "max": null, "negated": null }],
+        "format": ["#"],
+        "index_handlers": [[]],
+        "string": "레벨 {0} 숨겨진 능력 부여",
+        "reminder_text": null,
+        "is_markup": null
+      }
+    ],
+    "trade_stats": null
+  }
+]

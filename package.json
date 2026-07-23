@@ -11,6 +11,7 @@
     "refresh:temple": "tsx src/refresh-temple-prices.ts",
     "refresh:splits": "tsx src/refresh-split-prices.ts",
     "refresh:leagues": "tsx src/refresh-leagues.ts",
+    "refresh:localized": "tsx src/refresh-localized-data.ts",
     "test": "vitest run"
   },
   "dependencies": {

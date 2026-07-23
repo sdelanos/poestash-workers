@@ -1,0 +1,10 @@
+{
+  "Metadata/Items/Weapons/OneHandWeapons/Daggers/Dagger1": {
+    "name": "玻璃銳片",
+    "item_class": "Dagger"
+  },
+  "Metadata/Items/Currency/CurrencyUpgradeToRare": {
+    "name": "點金石",
+    "item_class": "StackableCurrency"
+  }
+}

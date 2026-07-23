@@ -1,0 +1,8 @@
+{
+  "0": {
+    "id": "Kaom's Primacy",
+    "name": "Primauté de Kaom",
+    "item_class": "Axe",
+    "visual_identity": { "dds_file": "Art/.../TwoHandAxe11Unique.dds", "id": "UniqueTwoHandAxe1" }
+  }
+}

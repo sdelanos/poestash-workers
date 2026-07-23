@@ -1,0 +1,132 @@
+name: Refresh Localized Game Data
+
+# Self-hosted RePoE extraction for PoE1 localized game data (ADR 0004 in the app
+# repo). Keyed off the public PoE1 patch-version file: when GGG ships a patch we
+# re-run the fork headless against the CDN with every language, post-process the
+# output into the vendored shape, and open a PR against the app repo. Data only —
+# nothing consumes the localized slots yet (that is #4 / #5).
+on:
+  schedule:
+    # Hourly at :30. The version gate below makes almost every run a no-op cheap
+    # curl; a real extraction only fires on the ~handful of PoE1 patches a league.
+    - cron: '30 * * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Run extraction even if the patch version is unchanged'
+        type: boolean
+        default: false
+
+concurrency:
+  group: localized-data-refresh
+  cancel-in-progress: false
+
+env:
+  # Pinned tooling — one maintainer upstream, so we move deliberately (ADR 0004).
+  REPOE_REF: master
+  PYPOE_REF: dev
+  APP_REPO: sdelanos/poestash
+  LATEST_PATCH_URL: https://raw.githubusercontent.com/poe-tool-dev/latest-patch-version/main/latest.txt
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide whether to extract
+        id: gate
+        run: |
+          latest="$(curl -fsSL "$LATEST_PATCH_URL" | tr -d '[:space:]')"
+          if [ -z "$latest" ]; then
+            echo "Upstream latest.txt was empty — refusing to run without a patch version."
+            exit 1
+          fi
+          # Emit the version before the next fetch: on the first-ever run (or if
+          # version.txt is missing) the vendored fetch 404s, and we still need
+          # `latest` available to later steps. Soften it so a missing baseline
+          # means "extract", not "crash".
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          vendored="$(curl -fsSL "https://raw.githubusercontent.com/${APP_REPO}/main/docs/repoe-data/version.txt" 2>/dev/null | tr -d '[:space:]' || echo "")"
+          echo "Upstream PoE1 patch: $latest / vendored: ${vendored:-<none>}"
+          if [ "$latest" != "$vendored" ] || [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Patch unchanged — nothing to do."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
+        with:
+          python-version: '3.11'
+
+      - name: Check out the RePoE fork and its PyPoE sibling
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          # RePoE's pyproject expects PyPoE as a sibling (`path = "../PyPoE"`).
+          git clone --depth 1 --branch "$PYPOE_REF" https://github.com/repoe-fork/PyPoE.git tooling/PyPoE
+          git clone --depth 1 --branch "$REPOE_REF" https://github.com/repoe-fork/RePoE.git tooling/RePoE
+
+      - name: Install RePoE
+        if: steps.gate.outputs.run == 'true'
+        working-directory: tooling/RePoE
+        run: |
+          pipx install poetry
+          poetry install --no-interaction
+
+      - name: Extract PoE1, all languages (headless, from the patch CDN)
+        if: steps.gate.outputs.run == 'true'
+        working-directory: tooling/RePoE
+        run: |
+          # Reads bundles over HTTPS from patch.poecdn.com — no game install, no
+          # login. Writes English to data/ and each language to data/{Language}/.
+          poetry run repoe all --language all
+
+      - name: Post-process into the vendored shape + schema gate
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          npm ci
+          # RePoE exports to <repo>/RePoE/data/ (the inner package dir), so with
+          # the clone at tooling/RePoE the output lives at tooling/RePoE/RePoE/data.
+          npx tsx src/refresh-localized-data.ts assemble \
+            --src tooling/RePoE/RePoE/data \
+            --out staged/repoe-data \
+            --version "${{ steps.gate.outputs.latest }}"
+
+      - name: Check out the app repo
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.APP_REPO }}
+          token: ${{ secrets.POESTASH_REPO_TOKEN }}
+          path: app
+
+      - name: Overlay refreshed data
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          # Overlay so README.md / docs/ under the vendored dir are preserved.
+          cp -R staged/repoe-data/. app/docs/repoe-data/
+
+      - name: Open PR against the app repo
+        if: steps.gate.outputs.run == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.POESTASH_REPO_TOKEN }}
+          path: app
+          branch: data/localized-refresh
+          commit-message: 'data: refresh localized game data (PoE1 ${{ steps.gate.outputs.latest }})'
+          title: 'data: localized game data refresh (PoE1 ${{ steps.gate.outputs.latest }})'
+          body: |
+            Automated `repoe-fork/RePoE --language all` extraction for PoE1
+            `${{ steps.gate.outputs.latest }}`. Fills the non-English
+            `stat_translations.json` slots and refreshes per-language
+            `{Language}/names.json` lookups. See ADR 0004.
+          labels: automated, data

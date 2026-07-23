@@ -1,0 +1,18 @@
+[
+  {
+    "ids": ["attack_speed_+%"],
+    "French": [
+      {
+        "condition": [{ "min": 1, "max": null, "negated": null }],
+        "format": ["#"],
+        "index_handlers": [[]],
+        "string": "{0}% d'augmentation de la vitesse d'attaque",
+        "reminder_text": null,
+        "is_markup": null
+      }
+    ],
+    "trade_stats": [
+      { "id": "explicit.stat_210067635", "text": "#% increased Attack Speed", "type": "explicit", "option": null }
+    ]
+  }
+]

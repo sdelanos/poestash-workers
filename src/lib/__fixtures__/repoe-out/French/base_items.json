@@ -1,0 +1,10 @@
+{
+  "Metadata/Items/Weapons/OneHandWeapons/Daggers/Dagger1": {
+    "name": "Stylet en verre",
+    "item_class": "Dagger"
+  },
+  "Metadata/Items/Currency/CurrencyUpgradeToRare": {
+    "name": "Orbe d'alchimie",
+    "item_class": "StackableCurrency"
+  }
+}
