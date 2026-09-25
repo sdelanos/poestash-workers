@@ -15,7 +15,7 @@
  *   npx tsx src/refresh-ninja-prices.ts "Fate of the Vaal" poe2
  *   npx tsx src/refresh-ninja-prices.ts auto poe2
  *
- * Designed to run every ~10 minutes via GitHub Actions cron.
+ * Fired every 30 minutes by the poestash vercel.json cron (ADR 0063).
  * Each run does a full refresh: fetch all categories, batch upsert.
  *
  * Rows are never deleted by this worker. poe.ninja serves low-volume
@@ -23,6 +23,12 @@
  * back in the next. Keeping the last-known price (with whatever updated_at
  * it has) is strictly better than serving 0c. League-level staleness is
  * tracked in ninja_price_meta.last_refreshed_at.
+ *
+ * A row is only rewritten when its data changed (see UPSERT_CLAUSE), so
+ * ninja_prices.updated_at means "last time this row's data changed", not
+ * "last seen in the feed". The poestash app never reads that column;
+ * freshness comes from ninja_price_meta.last_refreshed_at, which is still
+ * bumped on every run.
  *
  * Requires DATABASE_URL environment variable.
  */
@@ -33,6 +39,7 @@ import { fetchAllNinjaPrices } from "./lib/ninja-fetcher";
 import { fetchAllPoe2Prices } from "./lib/ninja-fetcher-poe2";
 import { discoverPoe1Leagues, discoverPoe2Leagues } from "./lib/ninja-leagues";
 import type { NinjaFetchedItem } from "./lib/ninja-types";
+import { COLUMNS, UPSERT_CLAUSE } from "./lib/ninja-upsert";
 
 type Game = "poe1" | "poe2";
 
@@ -45,20 +52,6 @@ function isGame(value: string): value is Game {
 // ---------------------------------------------------------------------------
 
 const BATCH_SIZE = 500;
-
-// All columns in ninja_prices, in insertion order.
-// Must match the ON CONFLICT SET clause below.
-const COLUMNS = [
-  "game", "league", "item_name", "chaos_value", "divine_value",
-  "listing_count", "source", "ninja_category", "icon", "details_id",
-  "sparkline_data", "total_change", "stack_size", "explicit_modifiers",
-  "variant", "base_type", "links", "item_class", "item_type",
-  "corrupted", "gem_level", "gem_quality", "level_required",
-  "exalted_value", "count", "volume", "mutated_modifiers",
-  "flavour_text", "implicit_modifiers", "property_modifiers", "requirement_modifiers",
-  "pay_value", "receive_value", "pay_listing_count", "receive_listing_count",
-  "updated_at",
-] as const;
 
 // ---------------------------------------------------------------------------
 // Row mapping
@@ -179,47 +172,17 @@ async function refreshOneLeague(
 
   const now = new Date();
   const totalBatches = Math.ceil(valid.length / BATCH_SIZE);
+  let written = 0;
 
   for (let i = 0; i < valid.length; i += BATCH_SIZE) {
     const batch = valid.slice(i, i + BATCH_SIZE);
     const dbRows = batch.map((row) => toDbRow(row, now));
 
-    await sql`
+    const result = await sql`
       INSERT INTO ninja_prices ${sql(dbRows, ...COLUMNS)}
-      ON CONFLICT (game, league, details_id, source) DO UPDATE SET
-        item_name = EXCLUDED.item_name,
-        chaos_value = EXCLUDED.chaos_value,
-        divine_value = EXCLUDED.divine_value,
-        listing_count = EXCLUDED.listing_count,
-        ninja_category = EXCLUDED.ninja_category,
-        icon = EXCLUDED.icon,
-        sparkline_data = EXCLUDED.sparkline_data,
-        total_change = EXCLUDED.total_change,
-        stack_size = EXCLUDED.stack_size,
-        explicit_modifiers = EXCLUDED.explicit_modifiers,
-        variant = EXCLUDED.variant,
-        base_type = EXCLUDED.base_type,
-        links = EXCLUDED.links,
-        item_class = EXCLUDED.item_class,
-        item_type = EXCLUDED.item_type,
-        corrupted = EXCLUDED.corrupted,
-        gem_level = EXCLUDED.gem_level,
-        gem_quality = EXCLUDED.gem_quality,
-        level_required = EXCLUDED.level_required,
-        exalted_value = EXCLUDED.exalted_value,
-        count = EXCLUDED.count,
-        volume = EXCLUDED.volume,
-        mutated_modifiers = EXCLUDED.mutated_modifiers,
-        flavour_text = EXCLUDED.flavour_text,
-        implicit_modifiers = EXCLUDED.implicit_modifiers,
-        property_modifiers = EXCLUDED.property_modifiers,
-        requirement_modifiers = EXCLUDED.requirement_modifiers,
-        pay_value = EXCLUDED.pay_value,
-        receive_value = EXCLUDED.receive_value,
-        pay_listing_count = EXCLUDED.pay_listing_count,
-        receive_listing_count = EXCLUDED.receive_listing_count,
-        updated_at = EXCLUDED.updated_at
+      ${sql.unsafe(UPSERT_CLAUSE)}
     `;
+    written += result.count;
 
     const batchNum = Math.floor(i / BATCH_SIZE) + 1;
     if (batchNum % 20 === 0 || batchNum === totalBatches) {
@@ -237,7 +200,9 @@ async function refreshOneLeague(
   `;
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-  console.log(`  done in ${elapsed}s — ${valid.length} upserted`);
+  console.log(
+    `  done in ${elapsed}s — ${written} of ${valid.length} rows written (rest unchanged)`,
+  );
 
   return { upserted: valid.length, divineRate };
 }

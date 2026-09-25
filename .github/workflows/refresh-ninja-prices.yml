@@ -1,7 +1,7 @@
 name: Refresh Ninja Prices
 on:
-  # Every 20 minutes — each run fetches all poe.ninja categories and
-  # batch-upserts ~40k rows. Completes in ~15 seconds. The cadence lives in
+  # Every 30 minutes — each run fetches all poe.ninja categories and
+  # batch-upserts ~40k rows, rewriting only the ones whose data changed. Completes in ~15 seconds. The cadence lives in
   # the `vercel.json` cron that fires this event, not here: there is no
   # `schedule:` fallback, because GitHub delivered a fraction of these under
   # global load while every run it did start succeeded (ADR 0063).

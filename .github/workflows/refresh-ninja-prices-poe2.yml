@@ -1,6 +1,6 @@
 name: Refresh Ninja Prices (PoE 2)
 on:
-  # Every 20 minutes. PoE 2 has 13 categories per league and only one
+  # Every 30 minutes. PoE 2 has 13 categories per league and only one
   # currently-indexed league, so a full refresh is ~14 fetches and a
   # few hundred upserts. Completes in a few seconds. The cadence lives in
   # the `vercel.json` cron that fires this event; no `schedule:` fallback
