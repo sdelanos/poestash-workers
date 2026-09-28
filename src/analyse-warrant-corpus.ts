@@ -140,7 +140,7 @@ async function chaosRates(league: string, divineOverride: number | null) {
   if (!process.env.DATABASE_URL) {
     throw new Error("Set DATABASE_URL for chaos rates, or pass --divine N");
   }
-  const sql = postgres(process.env.DATABASE_URL, { connect_timeout: 10 });
+  const sql = postgres(process.env.DATABASE_URL, { connect_timeout: 10, prepare: false });
   try {
     const rows = await sql<{ item_name: string; chaos_value: number; source: string }[]>`
       SELECT item_name, chaos_value, source FROM ninja_prices

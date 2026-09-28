@@ -241,6 +241,7 @@ async function main() {
   const sql = postgres(databaseUrl, {
     idle_timeout: 30,
     max_lifetime: 300,
+    prepare: false,
   });
 
   let firstError: unknown = null;

@@ -160,7 +160,7 @@ async function main() {
     throw new Error("POE_CLIENT_ID and POE_CLIENT_SECRET are required");
   }
 
-  const sql = postgres(dbUrl);
+  const sql = postgres(dbUrl, { prepare: false });
   try {
     const token = await getServiceToken(clientId, clientSecret);
 
