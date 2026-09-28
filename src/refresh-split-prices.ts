@@ -214,7 +214,7 @@ async function main() {
     process.exit(1);
   }
 
-  const sql = postgres(process.env.DATABASE_URL, { idle_timeout: 30, max_lifetime: 300, connect_timeout: 10 });
+  const sql = postgres(process.env.DATABASE_URL, { idle_timeout: 30, max_lifetime: 300, connect_timeout: 10, prepare: false });
 
   const league = await resolveTradeLeague(sql, explicit);
   if (!league) {

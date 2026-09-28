@@ -191,6 +191,7 @@ async function main() {
   const sql = postgres(process.env.DATABASE_URL, {
     idle_timeout: 30,
     max_lifetime: 300,
+    prepare: false,
     connect_timeout: 10,
   });
 
