@@ -21,7 +21,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       POE_CLIENT_ID: ${{ secrets.POE_CLIENT_ID }}

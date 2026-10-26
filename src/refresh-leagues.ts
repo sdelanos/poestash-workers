@@ -7,18 +7,29 @@
  * Usage:
  *   npx tsx src/refresh-leagues.ts
  *
- * Designed to run hourly via GitHub Actions cron. Each run does ONE
- * client-credentials OAuth + FOUR /league calls (poe1 pc/xbox/sony +
- * poe2 pc). PoE 2 console isn't supported by GGG yet so we skip those.
+ * Runs hourly, dispatched by the app's Vercel cron. Each run does ONE
+ * client-credentials OAuth + EIGHT /league calls (type=event and type=main
+ * for poe1 pc/xbox/sony + poe2 pc). PoE 2 console isn't supported by GGG yet
+ * so we skip those. The calls are paced by GGG's rate-limit headers: fired
+ * back to back, the sixth was a 429 on every run from July to October, so
+ * PoE 1 PlayStation and PoE 2 were only ever refreshed by the app's fallback.
+ *
+ * Any failed call fails the run (exit 1) after writing the pairs that did
+ * succeed — a run that drops half its pairs is not a green run.
  *
  * Requires DATABASE_URL, POE_CLIENT_ID, and POE_CLIENT_SECRET env vars.
  */
 
 import "dotenv/config";
 import postgres from "postgres";
+import { createPacedFetch } from "./lib/paced-fetch";
 
 const OAUTH_BASE = "https://www.pathofexile.com";
 const API_BASE = "https://api.pathofexile.com";
+
+const pacedFetch = createPacedFetch(5_000);
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const userAgent = `OAuth ${process.env.POE_CLIENT_ID ?? "poestashapp"}/1.0.0 (contact: contact@poestash.com)`;
 
@@ -116,12 +127,21 @@ async function fetchLeaguesOfType(
   type: "main" | "event",
 ): Promise<PoeLeague[]> {
   const url = `${API_BASE}/league?type=${type}&realm=${encodeURIComponent(realmParam)}`;
-  const res = await fetch(url, {
+  const init = {
     headers: {
       Authorization: `Bearer ${token}`,
       "User-Agent": userAgent,
     },
-  });
+  };
+  let res = await pacedFetch(url, init);
+  // One retry after the advertised cooldown: the pacing should keep us under
+  // the limit, but the window is shared with anything else on this IP.
+  if (res.status === 429) {
+    const retry = Number(res.headers.get("retry-after") ?? "60");
+    console.log(`[leagues] 429 on ${url}, retrying in ${retry}s`);
+    await sleep(retry * 1000);
+    res = await pacedFetch(url, init);
+  }
   if (!res.ok) {
     if (res.status === 429) {
       const retry = res.headers.get("retry-after");
@@ -132,6 +152,10 @@ async function fetchLeaguesOfType(
   const data = (await res.json()) as { leagues: PoeLeague[] };
   return data.leagues ?? [];
 }
+
+/** Calls that failed this run. Each is logged where it happens; main() turns
+ *  a non-empty list into exit 1. */
+const failures: string[] = [];
 
 async function fetchLeagues(token: string, realmParam: string): Promise<PoeLeague[]> {
   // type=main is load-bearing for the selector, so it throws on failure. The
@@ -144,6 +168,7 @@ async function fetchLeagues(token: string, realmParam: string): Promise<PoeLeagu
         `[leagues] type=event fetch failed for realm=${realmParam}:`,
         err instanceof Error ? err.message : err,
       );
+      failures.push(`${realmParam}/event`);
       return [] as PoeLeague[];
     },
   );
@@ -191,10 +216,14 @@ async function main() {
         console.log(`[leagues] ${pair.game}/${pair.realm}: ${leagues.length} leagues`);
       } catch (err) {
         console.error(`[leagues] ${pair.game}/${pair.realm} failed:`, err instanceof Error ? err.message : err);
+        failures.push(`${pair.game}/${pair.realm}`);
       }
     }
   } finally {
     await sql.end({ timeout: 5 });
+  }
+  if (failures.length > 0) {
+    throw new Error(`${failures.length} call(s) failed: ${failures.join(", ")}`);
   }
 }
 

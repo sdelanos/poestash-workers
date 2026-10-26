@@ -43,7 +43,13 @@ import "dotenv/config";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import postgres from "postgres";
-import { getRiverToken, StashRiver, syntheticChangeId, seekToTail } from "./lib/stash-river";
+import {
+  changeIdPosition,
+  getRiverToken,
+  StashRiver,
+  syntheticChangeId,
+  seekToTail,
+} from "./lib/stash-river";
 import { toChaos } from "./lib/listing-price";
 import {
   readWarrantObservations,
@@ -59,9 +65,16 @@ import { buildCorpus, dedupeObservations, type PricedObservation } from "./lib/w
 /** Pages to drain. ~30 stashes and ~28 priced Warrants a page near the tail. */
 const DEFAULT_PAGES = 300;
 /** Change-id units to step back from the tail, so there is a backlog to drain
- *  at full pace instead of idling on the live edge. ~2e6 held a drain busy for
- *  well past 25 pages when measured. */
-const DEFAULT_BEHIND = 2_000_000;
+ *  at full pace instead of idling on the live edge.
+ *
+ *  This was 2e6, and 2e6 is days of stream: the tail advanced ~4.6e6 in the
+ *  two weeks to 2026-09-25, so 2e6 sat roughly a week back, and 300 pages
+ *  never once drained it — every run ended on the page cap without catching
+ *  up. 1e4 is under an hour at that rate, so even a drain that does not reach
+ *  the edge samples the current market. It is an estimate, not a measurement:
+ *  how far one page advances an id was never logged, which is what the drain's
+ *  closing line now reports, so the next tuning has a number to start from. */
+const DEFAULT_BEHIND = 10_000;
 /** Wall-clock ceiling, so the run ends on time even if pages come slowly. */
 const MAX_ELAPSED_MS = 12 * 60_000;
 /** Below this, a league's sample is noise and no row is written for it. This
@@ -103,6 +116,10 @@ interface DrainResult {
   items: number;
   /** Warrants seen at all, priced or not — the denominator for the price rate. */
   warrants: number;
+  /** Whether the drain reached the end of the stream, rather than its budget. */
+  caughtUp: boolean;
+  /** Where the drain stopped: the id the next page would have been read from. */
+  cursor: string;
 }
 
 /**
@@ -126,6 +143,7 @@ async function drain(
   let stashes = 0;
   let items = 0;
   let warrants = 0;
+  let caughtUp = false;
 
   while (pages < maxPages && Date.now() < deadline) {
     const page = await river.page(cursor);
@@ -152,16 +170,18 @@ async function drain(
       );
     }
 
-    // No next id, or one that does not advance, means the stream has nothing
-    // more to give this run. That is the sample ending, not a failure.
-    if (!page.nextChangeId || page.nextChangeId === cursor) {
+    // An empty page is GGG's documented end of the stream; no next id, or one
+    // that does not advance, means the same. That is the sample ending, not a
+    // failure.
+    if (page.stashes.length === 0 || !page.nextChangeId || page.nextChangeId === cursor) {
       console.log(`  stream caught up after ${pages} pages`);
+      caughtUp = true;
       break;
     }
     cursor = page.nextChangeId;
   }
 
-  return { observations, pages, stashes, items, warrants };
+  return { observations, pages, stashes, items, warrants, caughtUp, cursor };
 }
 
 // ---------------------------------------------------------------------------
@@ -246,13 +266,26 @@ async function main() {
   const { position, probes } = await seekToTail((id) => river.hasStashes(id));
   console.log(`Tail found at ~${position} in ${probes} probes; stepping back ${behind}`);
 
-  const drained = await drain(
-    river,
-    syntheticChangeId(position - behind),
-    maxPages,
-    deadline,
-    rawOut,
-  );
+  const from = position - behind;
+  const drained = await drain(river, syntheticChangeId(from), maxPages, deadline, rawOut);
+
+  // Say where the drain stopped against where the tail was. A run that ends on
+  // its budget short of the edge is sampling the past, and for a month that
+  // was every run, silently: the log said "page 300/300" and nothing else.
+  // The tail keeps moving while we drain, so the shortfall is a lower bound.
+  const reached = changeIdPosition(drained.cursor);
+  const perPage = reached != null && drained.pages > 0 ? (reached - from) / drained.pages : null;
+  const advance = perPage != null ? ` (~${perPage.toFixed(0)} units/page)` : "";
+  if (!drained.caughtUp) {
+    const short = reached != null ? `~${Math.max(0, position - reached)} units` : "an unknown distance";
+    console.warn(
+      `WARNING: drain did NOT catch up to the live tail: stopped after ${drained.pages} pages ` +
+        `at ~${reached ?? drained.cursor}${advance}, ${short} short of the tail found at start. ` +
+        `This run sampled the past; lower --behind or raise --pages.`,
+    );
+  } else {
+    console.log(`  drain reached the live tail from ${behind} units back${advance}`);
+  }
 
   // Tier 1 of the failure contract. A drain that saw no items at all means the
   // seek landed somewhere dead or the river stopped serving — and neither

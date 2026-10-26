@@ -29,6 +29,16 @@ function normalizeFlavour(
   return lines.length ? lines : null;
 }
 
+/** A 404 is poe.ninja saying the category isn't on this feed — 14 stash
+ *  categories answer 404 on every league, every run, because poe.ninja only
+ *  serves them on the exchange feed now. That is an empty answer, not an
+ *  outage. Anything else non-2xx is a real failure and has to reach the
+ *  caller, which used to swallow it and leave the run green. */
+export function notOnFeed(res: Response, url: string): NinjaFetchedItem[] {
+  if (res.status === 404) return [];
+  throw new Error(`${res.status} on ${url}`);
+}
+
 // ---------------------------------------------------------------------------
 // Stash: currency-format endpoint (Currency, Fragment)
 // ---------------------------------------------------------------------------
@@ -41,7 +51,7 @@ async function fetchStashCurrency(
 ): Promise<NinjaFetchedItem[]> {
   const url = `${NINJA_BASE}/stash/current/currency/overview?league=${encodeURIComponent(league)}&type=${type}`;
   const res = await fetch(url);
-  if (!res.ok) return [];
+  if (!res.ok) return notOnFeed(res, url);
 
   const data: NinjaCurrencyResponse = await res.json();
   if (!data.lines?.length) return [];
@@ -61,7 +71,7 @@ async function fetchStashItems(
 ): Promise<NinjaFetchedItem[]> {
   const url = `${NINJA_BASE}/stash/current/item/overview?league=${encodeURIComponent(league)}&type=${type}`;
   const res = await fetch(url);
-  if (!res.ok) return [];
+  if (!res.ok) return notOnFeed(res, url);
 
   const data: NinjaItemResponse = await res.json();
   if (!data.lines?.length) return [];
@@ -113,7 +123,7 @@ async function fetchExchange(
 ): Promise<NinjaFetchedItem[]> {
   const url = `${NINJA_BASE}/exchange/current/overview?league=${encodeURIComponent(league)}&type=${type}`;
   const res = await fetch(url);
-  if (!res.ok) return [];
+  if (!res.ok) return notOnFeed(res, url);
 
   const data: NinjaExchangeResponse = await res.json();
   if (!data.lines?.length || !data.items?.length) return [];
@@ -150,7 +160,9 @@ async function fetchExchange(
 export async function fetchAllNinjaPrices(
   game: string,
   league: string,
-): Promise<{ rows: NinjaFetchedItem[]; divineRate: number }> {
+  /** The rate stored by the last run, used when both lookups below miss. */
+  previousDivineRate = 0,
+): Promise<{ rows: NinjaFetchedItem[]; divineRate: number; failedCategories: string[] }> {
   // Step 1: Get divine rate from exchange (most accurate bulk price)
   let divineRate = 0;
   try {
@@ -182,6 +194,14 @@ export async function fetchAllNinjaPrices(
     }
   }
 
+  // Both miss on permanent Hardcore in roughly 4 runs out of 10. Writing 0
+  // there overwrote a good stored rate and zeroed every row's divineValue,
+  // so the last known rate stands in until a lookup succeeds again.
+  if (divineRate === 0 && previousDivineRate > 0) {
+    console.log(`  no divine rate from poe.ninja, keeping last known ${previousDivineRate.toFixed(1)}c`);
+    divineRate = previousDivineRate;
+  }
+
   // Step 2: Fetch all types in parallel.
   //
   // Stash feed: always fetch (the app uses stash data even for
@@ -193,28 +213,34 @@ export async function fetchAllNinjaPrices(
   // return empty exchange responses — fetching them was 24 wasted requests
   // per refresh.
   const fetches: Promise<NinjaFetchedItem[]>[] = [];
+  const failedCategories: string[] = [];
+  const recordFailure = (category: string) => (err: unknown) => {
+    console.error(`  ${category} failed: ${err instanceof Error ? err.message : err}`);
+    failedCategories.push(category);
+    return [] as NinjaFetchedItem[];
+  };
 
   for (const type of ALL_NINJA_TYPES) {
     // Stash: use currency-format or item-format based on type
     if (STASH_CURRENCY_FORMAT.has(type)) {
       fetches.push(
-        fetchStashCurrency(game, league, type, divineRate).catch(() => []),
+        fetchStashCurrency(game, league, type, divineRate).catch(recordFailure(`stash:${type}`)),
       );
     } else {
       fetches.push(
-        fetchStashItems(game, league, type, divineRate).catch(() => []),
+        fetchStashItems(game, league, type, divineRate).catch(recordFailure(`stash:${type}`)),
       );
     }
 
     // Exchange: only worth firing for canonical-exchange types
     if (EXCHANGE_CANONICAL_TYPES.has(type)) {
       fetches.push(
-        fetchExchange(game, league, type, divineRate).catch(() => []),
+        fetchExchange(game, league, type, divineRate).catch(recordFailure(`exchange:${type}`)),
       );
     }
   }
 
   const results = await Promise.all(fetches);
 
-  return { rows: results.flat(), divineRate };
+  return { rows: results.flat(), divineRate, failedCategories };
 }
