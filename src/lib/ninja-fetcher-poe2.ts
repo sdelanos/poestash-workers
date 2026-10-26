@@ -21,6 +21,7 @@
  */
 
 import type { NinjaExchangeResponse, NinjaFetchedItem } from "./ninja-types";
+import { notOnFeed } from "./ninja-fetcher";
 import { POE2_CATEGORIES } from "./poe2-categories";
 
 const NINJA_BASE = "https://poe.ninja/poe2/api/economy";
@@ -113,9 +114,9 @@ function findPrimaryValue(data: NinjaExchangeResponse, name: string): number {
   return idx >= 0 ? data.lines?.[idx]?.primaryValue ?? 0 : 0;
 }
 
-/** Fetch one PoE 2 category. Tolerates per-category failures (404, empty
- *  body, transient 5xx) by returning []. A single bad category should not
- *  abort the whole refresh, but a bad rate fetch upstream WILL. */
+/** Fetch one PoE 2 category. A 404 or empty body is []; any other failure
+ *  throws, and fetchAllPoe2Prices records it without aborting the other
+ *  categories. A bad rate fetch upstream still aborts the whole refresh. */
 async function fetchCategory(
   league: string,
   apiType: string,
@@ -123,7 +124,7 @@ async function fetchCategory(
 ): Promise<NinjaFetchedItem[]> {
   const url = `${NINJA_BASE}/exchange/current/overview?league=${encodeURIComponent(league)}&type=${apiType}`;
   const res = await fetch(url);
-  if (!res.ok) return [];
+  if (!res.ok) return notOnFeed(res, url);
 
   const data = (await res.json()) as NinjaExchangeResponse;
   if (!data.lines?.length || !data.items?.length) return [];
@@ -228,7 +229,7 @@ async function fetchItemCategory(
 ): Promise<NinjaFetchedItem[]> {
   const url = `${NINJA_BASE}/stash/current/item/overview?league=${encodeURIComponent(league)}&type=${apiType}`;
   const res = await fetch(url);
-  if (!res.ok) return [];
+  if (!res.ok) return notOnFeed(res, url);
 
   const data = (await res.json()) as Poe2ItemResponse;
   if (!data.lines?.length) return [];
@@ -286,7 +287,7 @@ async function fetchItemCategory(
 
 export async function fetchAllPoe2Prices(
   league: string,
-): Promise<{ rows: NinjaFetchedItem[]; divineRate: number } | null> {
+): Promise<{ rows: NinjaFetchedItem[]; divineRate: number; failedCategories: string[] } | null> {
   // Rate must succeed before we touch categories — every chaos value
   // depends on it, unlike PoE 1 where chaos values are independent.
   // `null` means poe.ninja lists the league but has not priced it yet
@@ -294,14 +295,19 @@ export async function fetchAllPoe2Prices(
   const rate = await getRateInfo(league);
   if (rate == null) return null;
 
+  const failedCategories: string[] = [];
   const results = await Promise.all(
     POE2_CATEGORIES.map((cat) =>
       (cat.view === "item"
         ? fetchItemCategory(league, cat.apiType, rate)
         : fetchCategory(league, cat.apiType, rate)
-      ).catch(() => [] as NinjaFetchedItem[]),
+      ).catch((err: unknown) => {
+        console.error(`  ${cat.apiType} failed: ${err instanceof Error ? err.message : err}`);
+        failedCategories.push(cat.apiType);
+        return [] as NinjaFetchedItem[];
+      }),
     ),
   );
 
-  return { rows: results.flat(), divineRate: rate.divineRate };
+  return { rows: results.flat(), divineRate: rate.divineRate, failedCategories };
 }

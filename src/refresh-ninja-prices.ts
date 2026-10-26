@@ -124,6 +124,7 @@ async function refreshOneLeague(
   console.log(`Fetching ${game}/${league} prices from poe.ninja...`);
   let rows: NinjaFetchedItem[];
   let divineRate: number;
+  let failedCategories: string[] = [];
   if (game === "poe2") {
     const result = await fetchAllPoe2Prices(league);
     if (result == null) {
@@ -136,9 +137,16 @@ async function refreshOneLeague(
       );
       return { upserted: 0, divineRate: 0 };
     }
-    ({ rows, divineRate } = result);
+    ({ rows, divineRate, failedCategories } = result);
   } else {
-    ({ rows, divineRate } = await fetchAllNinjaPrices(game, league));
+    const [previous] = await sql<{ divine_rate: number }[]>`
+      SELECT divine_rate FROM ninja_price_meta WHERE game = ${game} AND league = ${league}
+    `;
+    ({ rows, divineRate, failedCategories } = await fetchAllNinjaPrices(
+      game,
+      league,
+      previous?.divine_rate ?? 0,
+    ));
   }
 
   if (rows.length === 0) {
@@ -203,6 +211,12 @@ async function refreshOneLeague(
   console.log(
     `  done in ${elapsed}s — ${written} of ${valid.length} rows written (rest unchanged)`,
   );
+
+  // Thrown only after the write: what did arrive is still worth keeping, but
+  // a run that lost categories must not end green.
+  if (failedCategories.length > 0) {
+    throw new Error(`${failedCategories.length} categories failed: ${failedCategories.join(", ")}`);
+  }
 
   return { upserted: valid.length, divineRate };
 }
