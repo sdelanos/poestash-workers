@@ -13,15 +13,17 @@
  * workflow edit and prices exactly the leagues the ninja worker has data for.
  * Pass an explicit league name for an ad-hoc run.
  *
- * Designed to run hourly via GitHub Actions cron. Each run does ONE search
+ * Runs every 6h, dispatched by the app's Vercel cron. Each run does ONE search
  * call + ONE fetch call per (league, room) — currently 1 room (gem_room_3),
- * so 2 trade API calls per league per run. Well under the 30/300s ceiling.
+ * so 2 trade API calls per league per run, each paced by the rate-limit
+ * headers (lib/paced-fetch.ts).
  *
  * Requires DATABASE_URL and POE_CLIENT_ID environment variables.
  */
 
 import "dotenv/config";
 import postgres from "postgres";
+import { createPacedFetch } from "./lib/paced-fetch";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -32,8 +34,13 @@ const TRADE_BASE = "https://www.pathofexile.com/api/trade";
 /** Number of cheapest listings to consider when computing the median. */
 const SAMPLE_SIZE = 10;
 
-/** Pause between rooms (only relevant if more rooms get added later). */
-const PAUSE_MS = 10_000;
+/**
+ * Every trade call waits its turn here. These used to fire back to back across
+ * leagues, so the sixth call of every run was a 429: from July to October only
+ * the first leagues in the list were ever priced, and Standard players were
+ * served a July temple price as current.
+ */
+const pacedFetch = createPacedFetch(10_000);
 
 /**
  * "Open Room" option id on the `pseudo.pseudo_temple_gem_room_*` stats
@@ -129,11 +136,10 @@ async function searchRoom(league: string, room: TempleRoom): Promise<FetchResult
     sort: { price: "asc" },
   };
 
-  const searchRes = await fetch(`${TRADE_BASE}/search/${encodeURIComponent(league)}`, {
+  const searchRes = await pacedFetch(`${TRADE_BASE}/search/${encodeURIComponent(league)}`, {
     method: "POST",
     headers,
     body: JSON.stringify(query),
-    signal: AbortSignal.timeout(15_000),
   });
 
   if (searchRes.status === 429) {
@@ -152,9 +158,9 @@ async function searchRoom(league: string, room: TempleRoom): Promise<FetchResult
 
   // /fetch accepts up to 10 ids per request. Take the cheapest SAMPLE_SIZE.
   const ids = searchData.result.slice(0, SAMPLE_SIZE).join(",");
-  const fetchRes = await fetch(
+  const fetchRes = await pacedFetch(
     `${TRADE_BASE}/fetch/${ids}?query=${searchData.id}`,
-    { headers, signal: AbortSignal.timeout(15_000) },
+    { headers },
   );
 
   if (fetchRes.status === 429) {
@@ -205,7 +211,9 @@ function median(values: number[]): number | null {
  *  league the ninja worker currently prices (read from `ninja_price_meta`).
  *  That table already holds exactly the priced set, Standard, Hardcore, the
  *  live challenge league + its HC variant, and follows rollovers on its own,
- *  so temple tracks it without any league logic of its own. Empty (nothing
+ *  so temple tracks it without any league logic of its own. Ended leagues
+ *  keep their meta row forever, so only ones priced in the last day count:
+ *  searching a dead league is a 400 that still spends the rate budget. Empty (nothing
  *  priced yet) is a clean skip, not a failure. */
 async function resolveLeagues(
   sql: postgres.Sql,
@@ -214,7 +222,8 @@ async function resolveLeagues(
   if (explicit) return [explicit];
 
   const rows = await sql<{ league: string }[]>`
-    SELECT DISTINCT league FROM ninja_price_meta WHERE game = 'poe1'
+    SELECT DISTINCT league FROM ninja_price_meta
+    WHERE game = 'poe1' AND last_refreshed_at > NOW() - INTERVAL '1 day'
   `;
   const leagues = rows.map((r) => r.league);
   if (leagues.length === 0) {
@@ -262,9 +271,7 @@ async function refreshLeague(sql: postgres.Sql, league: string): Promise<void> {
   // 2. For each room, search trade and upsert.
   let updated = 0;
 
-  for (const [i, room] of ROOMS.entries()) {
-    if (i > 0) await new Promise((r) => setTimeout(r, PAUSE_MS));
-
+  for (const room of ROOMS) {
     try {
       const result = await searchRoom(league, room);
 
