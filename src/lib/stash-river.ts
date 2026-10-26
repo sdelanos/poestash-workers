@@ -11,8 +11,17 @@
  * are any number at all seeks to the nearest real position and answers with a
  * page from there. So a run finds the tail by bisection: probe a number,
  * observe whether the stream still has stashes past it, halve. Measured
- * 2026-08-30, the tail sat near 3.46e9 and nine probes found it — about five
- * seconds of the rate-limit budget, against a walk that would never finish.
+ * 2026-08-30, the tail sat near 3.46e9; bisecting it to within 1e3 costs 25
+ * probes — about twelve seconds of the rate-limit budget, against a walk that
+ * would never finish.
+ *
+ * **The precision has to be finer than the tail moves.** It used to stop at
+ * 5e6, which over this bracket means twelve halvings onto a fixed grid of
+ * (2e10 - 1e9) / 2^12 ≈ 4.64e6 steps. The tail only advances a few hundred
+ * thousand a day, so it crossed a grid line every few weeks: every run from
+ * 2026-09-26 to 2026-10-26 logged the same `3477050781` (grid cell 534 —
+ * 3472412109 is 533, 3467773437 is 532), stepped back to the same position,
+ * and drained the same historical slice up to three weeks old.
  *
  * **The tail moves, so it is never hardcoded.** The originating issue measured
  * a head near 5.2e9; by implementation that position returned empty, and the
@@ -51,9 +60,13 @@ const DEFAULT_INTERVAL_MS = 550;
  *  any plausible tail, so the search never needs them to be right, only wide. */
 const SEEK_LOW = 1_000_000_000;
 const SEEK_HIGH = 20_000_000_000;
-/** Stop bisecting once the bracket is this tight: further precision buys a
- *  slightly fresher slice for a request each, and the slice is a sample. */
-const SEEK_PRECISION = 5_000_000;
+/** Stop bisecting once the bracket is this tight. 1e3 is minutes of one
+ *  shard's flow at the measured rate, and each further halving is one more
+ *  request for a slice that is a sample anyway. */
+const SEEK_PRECISION = 1_000;
+/** A page is ~1MB of JSON. Generous, but bounded: a stalled response must fail
+ *  the run, not hang it until the job's outer timeout. */
+const PAGE_TIMEOUT_MS = 30_000;
 
 export interface RiverPage {
   stashes: RiverStash[];
@@ -64,6 +77,17 @@ export interface RiverPage {
 export function syntheticChangeId(position: number): string {
   const n = Math.floor(position);
   return `${n}-${n}-${n}-${n}-${n}`;
+}
+
+/**
+ * How far into the stream a change id reaches: its furthest component, or null
+ * when it does not parse. A run starts from a synthetic id, so every component
+ * begins equal and the furthest one is the shard that set the tail — which is
+ * what makes this comparable with `seekToTail`'s position.
+ */
+export function changeIdPosition(changeId: string): number | null {
+  if (!/^\d+(-\d+)*$/.test(changeId)) return null;
+  return Math.max(...changeId.split("-").map(Number));
 }
 
 /**
@@ -130,10 +154,18 @@ export class StashRiver {
   private nextAllowedAt = 0;
   private limitsLogged = false;
 
+  private readonly url: string;
+  private readonly timeoutMs: number;
+
+  /** `opts` exist for tests: a local stand-in for the river and a short timeout. */
   constructor(
     private readonly token: string,
     private readonly userAgent: string,
-  ) {}
+    opts: { url?: string; timeoutMs?: number } = {},
+  ) {
+    this.url = opts.url ?? RIVER_URL;
+    this.timeoutMs = opts.timeoutMs ?? PAGE_TIMEOUT_MS;
+  }
 
   /** Requests made, so a run can report what it spent. */
   requests = 0;
@@ -152,9 +184,17 @@ export class StashRiver {
     for (let attempt = 0; ; attempt++) {
       await this.pace();
 
-      const res = await fetch(`${RIVER_URL}?id=${encodeURIComponent(changeId)}`, {
+      // The body is read here, straight after the fetch and before anything
+      // can sleep. `AbortSignal.timeout` also bounds the body read, so a pause
+      // between the two — the 429 yield below, or pacing — would abort a body
+      // that had arrived fine. That is the bug the cluster worker shipped (see
+      // `paced-fetch.ts`); the signal starts after `pace()` for the same reason,
+      // so waiting for our turn never counts against the request.
+      const res = await fetch(`${this.url}?id=${encodeURIComponent(changeId)}`, {
         headers: { Authorization: `Bearer ${this.token}`, "User-Agent": this.userAgent },
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
+      const text = await res.text();
       this.requests++;
 
       // Pace off what the response actually advertises, capped so a malformed
@@ -183,7 +223,7 @@ export class StashRiver {
         throw new Error(`river returned ${res.status} ${res.statusText} for ${changeId}`);
       }
 
-      const body = (await res.json()) as {
+      const body = JSON.parse(text) as {
         stashes?: RiverStash[];
         next_change_id?: string | null;
       };
