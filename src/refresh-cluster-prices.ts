@@ -22,7 +22,7 @@ import postgres from "postgres";
 import { SMALL_COMBOS, smallComboRows } from "./lib/small-cluster-combos";
 import { resolveTradeLeague } from "./lib/trade-league";
 import { buildComboSearchQuery, type JewelSize } from "./lib/cluster-query";
-import { sustainableIntervalMs, describeLimits } from "./lib/rate-limit";
+import { createPacedFetch } from "./lib/paced-fetch";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -61,33 +61,12 @@ const CURRENCY_SLUGS: Record<string, string> = {
 
 const userAgent = `OAuth ${process.env.POE_CLIENT_ID ?? "poestashapp"}/1.0.0 (contact: contact@poestash.com)`;
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 /**
  * The budget is per request and a combo costs two of them — a search, then a
  * fetch for the cheapest listing's price. Pacing per combo is what ran this
  * worker at double the allowed rate (#7), so every request waits its own turn.
  */
-let intervalMs = DEFAULT_INTERVAL_MS;
-let limitsLogged = false;
-
-async function pacedFetch(url: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(url, init);
-
-  const advertised = sustainableIntervalMs(res.headers);
-  if (advertised != null) intervalMs = advertised;
-
-  if (!limitsLogged) {
-    console.log(`${describeLimits(res.headers)} — pacing ${(intervalMs / 1000).toFixed(1)}s/request`);
-    limitsLogged = true;
-  }
-
-  // A 429 carries its own Retry-After, which the caller sleeps instead. Adding
-  // the cooldown on top would just delay the retry further.
-  if (res.status !== 429) await sleep(intervalMs);
-
-  return res;
-}
+const pacedFetch = createPacedFetch(DEFAULT_INTERVAL_MS);
 
 async function searchCombo(
   league: string,
@@ -106,7 +85,6 @@ async function searchCombo(
     method: "POST",
     headers,
     body: JSON.stringify(query),
-    signal: AbortSignal.timeout(15_000),
   });
 
   if (searchRes.status === 429) {
@@ -127,7 +105,7 @@ async function searchCombo(
   // price fixing is impossible — the cheapest listing is the real market price.
   const fetchRes = await pacedFetch(
     `${TRADE_BASE}/fetch/${searchData.result[0]}?query=${searchData.id}`,
-    { headers, signal: AbortSignal.timeout(15_000) },
+    { headers },
   );
 
   if (fetchRes.status === 429) {
@@ -304,6 +282,8 @@ async function main() {
   let processed = 0;
   let withListings = 0;
   let rateLimitHits = 0;
+  let errors = 0;
+  const failedThisRun: string[] = [];
   const startTime = Date.now();
 
   while (!stopping) {
@@ -314,8 +294,10 @@ async function main() {
       FROM cluster_jewel_prices
       WHERE league = ${league}
         AND (last_refreshed_at IS NULL
+          OR listing_count IS NULL
           OR (listing_count > 0 AND last_refreshed_at < NOW() - INTERVAL '24 hours')
           OR (listing_count = 0 AND last_refreshed_at < NOW() - INTERVAL '48 hours'))
+        AND NOT (enchantment_tag || '|' || combo_key = ANY(${sql.array(failedThisRun)}::text[]))
       ORDER BY last_refreshed_at ASC NULLS FIRST
       LIMIT 1
     `;
@@ -369,23 +351,19 @@ async function main() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  ERROR: ${combo.combo_key}: ${msg}`);
-      // Update last_refreshed_at to avoid infinite retry on persistent errors
-      // (e.g. bad combo data), but keep listing_count and min_price_chaos
-      // untouched so transient API errors don't wipe good data.
-      await sql`
-        UPDATE cluster_jewel_prices
-        SET last_refreshed_at = NOW()
-        WHERE league = ${league}
-          AND enchantment_tag = ${combo.enchantment_tag}
-          AND combo_key = ${combo.combo_key}
-      `;
-      processed++;
+      // Leave the row alone: last_refreshed_at means "priced at", and bumping
+      // it on failure is what let every combo fail from August to October
+      // while the app showed the frozen prices as fresh. Skipping the combo
+      // for the rest of this run is what stops a persistent error retrying
+      // forever; the next run tries it again.
+      failedThisRun.push(`${combo.enchantment_tag}|${combo.combo_key}`);
+      errors++;
     }
     // No pause here: pacedFetch already waited out each request's own turn.
   }
 
   const elapsed = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
-  console.log(`\nDone! Processed ${processed} combos in ${elapsed} min (${withListings} with listings, ${rateLimitHits} rate limit hits)`);
+  console.log(`\nDone! Processed ${processed} combos in ${elapsed} min (${withListings} with listings, ${errors} errors, ${rateLimitHits} rate limit hits)`);
 
   await sql.end();
 }
