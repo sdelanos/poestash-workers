@@ -22,7 +22,7 @@ import postgres from "postgres";
 import { SMALL_COMBOS, smallComboRows } from "./lib/small-cluster-combos";
 import { resolveTradeLeague } from "./lib/trade-league";
 import { buildComboSearchQuery, type JewelSize } from "./lib/cluster-query";
-import { createPacedFetch } from "./lib/paced-fetch";
+import { BlockedError, createPacedFetch } from "./lib/paced-fetch";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -349,6 +349,7 @@ async function main() {
         );
       }
     } catch (err) {
+      if (err instanceof BlockedError) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  ERROR: ${combo.combo_key}: ${msg}`);
       // Leave the row alone: last_refreshed_at means "priced at", and bumping
