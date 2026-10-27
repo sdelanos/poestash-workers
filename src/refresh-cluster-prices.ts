@@ -65,8 +65,14 @@ const userAgent = `OAuth ${process.env.POE_CLIENT_ID ?? "poestashapp"}/1.0.0 (co
  * The budget is per request and a combo costs two of them — a search, then a
  * fetch for the cheapest listing's price. Pacing per combo is what ran this
  * worker at double the allowed rate (#7), so every request waits its own turn.
+ *
+ * Search and fetch are separate GGG policies (trade-search-request-limit,
+ * 600/6h; trade-fetch-request-limit, 1000/6h), so each gets its own pacer
+ * reading its own headers. Sharing one made every fetch wait out the search
+ * interval, halving throughput to ~1100 combos/day against 2900 due daily.
  */
-const pacedFetch = createPacedFetch(DEFAULT_INTERVAL_MS);
+const searchFetch = createPacedFetch(DEFAULT_INTERVAL_MS);
+const listingFetch = createPacedFetch(DEFAULT_INTERVAL_MS);
 
 async function searchCombo(
   league: string,
@@ -81,7 +87,7 @@ async function searchCombo(
 
   const query = buildComboSearchQuery(jewelSize, tradeStatIds);
 
-  const searchRes = await pacedFetch(`${TRADE_BASE}/search/${encodeURIComponent(league)}`, {
+  const searchRes = await searchFetch(`${TRADE_BASE}/search/${encodeURIComponent(league)}`, {
     method: "POST",
     headers,
     body: JSON.stringify(query),
@@ -103,7 +109,7 @@ async function searchCombo(
 
   // Fetch the cheapest listing. With securable (instant buyout) status,
   // price fixing is impossible — the cheapest listing is the real market price.
-  const fetchRes = await pacedFetch(
+  const fetchRes = await listingFetch(
     `${TRADE_BASE}/fetch/${searchData.result[0]}?query=${searchData.id}`,
     { headers },
   );
@@ -360,7 +366,7 @@ async function main() {
       failedThisRun.push(`${combo.enchantment_tag}|${combo.combo_key}`);
       errors++;
     }
-    // No pause here: pacedFetch already waited out each request's own turn.
+    // No pause here: the pacers already waited out each request's own turn.
   }
 
   const elapsed = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
