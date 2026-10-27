@@ -23,7 +23,7 @@
 
 import "dotenv/config";
 import postgres from "postgres";
-import { createPacedFetch } from "./lib/paced-fetch";
+import { BlockedError, createPacedFetch } from "./lib/paced-fetch";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -322,7 +322,9 @@ async function refreshLeague(sql: postgres.Sql, league: string): Promise<void> {
       // Trade-API errors are logged, not fatal. The trade API is flaky and
       // heavily rate-limited, so a transient failure on one room must not fail
       // the run. The last-known price stays in the table until the next tick.
-      // Only a DB/discovery error (outside this loop) fails the run loud.
+      // Only a DB/discovery error (outside this loop) fails the run loud, or
+      // a blocked runner, which would fail every remaining room the same way.
+      if (err instanceof BlockedError) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  ERROR on ${room.roomKey}: ${msg}`);
     }
@@ -361,6 +363,8 @@ async function main() {
       try {
         await refreshLeague(sql, league);
       } catch (err) {
+        // A block is per runner, not per league: the next league would hit it too.
+        if (err instanceof BlockedError) throw err;
         console.error(`[${league}] failed:`, err instanceof Error ? err.message : err);
         // Keep going so one bad league does not abort the rest of the refresh.
         if (firstError == null) firstError = err;

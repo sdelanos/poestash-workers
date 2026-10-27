@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createPacedFetch } from "./paced-fetch";
+import { BlockedError, createPacedFetch } from "./paced-fetch";
 
 // A stand-in for the trade API: advertises one request per 300ms, so the
 // pacer's interval is longer than the request timeouts used below — the shape
@@ -9,10 +9,16 @@ import { createPacedFetch } from "./paced-fetch";
 let server: Server;
 let url: string;
 const hits: number[] = [];
+// Paths under /403 answer the way Cloudflare does for a blocked IP.
 
 beforeAll(async () => {
   server = createServer((_req, res) => {
     hits.push(Date.now());
+    if (_req.url?.startsWith("/403")) {
+      res.writeHead(403, { "Content-Type": "text/html" });
+      res.end("<title>Access denied | Cloudflare</title>");
+      return;
+    }
     res.writeHead(200, {
       "Content-Type": "application/json",
       "X-Rate-Limit-Rules": "ip",
@@ -60,5 +66,20 @@ describe("createPacedFetch", () => {
     await pacedFetch(url);
     await pacedFetch(url);
     expect(hits[1] - hits[0]).toBeGreaterThanOrEqual(290);
+  });
+
+  // 2026-10-27: Cloudflare blocked one runner's IP and the cluster worker
+  // logged 1103 403s over three hours, then exited 0.
+  it("throws BlockedError after five consecutive 403s", async () => {
+    const pacedFetch = createPacedFetch(0);
+    for (let i = 0; i < 4; i++) expect((await pacedFetch(`${url}/403`)).status).toBe(403);
+    await expect(pacedFetch(`${url}/403`)).rejects.toBeInstanceOf(BlockedError);
+  });
+
+  it("resets the 403 count on any other response", async () => {
+    const pacedFetch = createPacedFetch(0);
+    for (let i = 0; i < 4; i++) await pacedFetch(`${url}/403`);
+    await pacedFetch(url);
+    for (let i = 0; i < 4; i++) expect((await pacedFetch(`${url}/403`)).status).toBe(403);
   });
 });
