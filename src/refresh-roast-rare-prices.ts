@@ -46,6 +46,12 @@ import { buildRareSearchQuery, type RoastRareMarket } from "./lib/roast-rare-que
 
 const TRADE_BASE = "https://www.pathofexile.com/api/trade";
 
+/** The game this worker prices: it queries the PoE 1 trade API, and the app
+ *  only asks for PoE 1 guides to be warmed. `game` leads the table's key
+ *  (app migration 0029), so every read, update and eviction here is scoped to
+ *  it: a PoE 2 league sharing a name ("Standard") is another market. */
+const GAME = "poe1";
+
 /** Rate limits: 5/10s, 15/60s, 30/300s. 30/300s binds at one request per ~10s
  *  for a worker running alone. This one is not alone — see the header — so it
  *  takes 15s and leaves the difference to the workers that serve every user. */
@@ -205,7 +211,7 @@ async function main() {
   // feed is ~40k rows and none of the rest is a listing currency.
   const priceRows = await sql<{ item_name: string; chaos_value: number; source: string }[]>`
     SELECT item_name, chaos_value, source FROM ninja_prices
-    WHERE game = 'poe1' AND league = ${league} AND ninja_category = 'Currency'
+    WHERE game = ${GAME} AND league = ${league} AND ninja_category = 'Currency'
   `;
   const best = new Map<string, number>();
   for (const r of priceRows) {
@@ -223,7 +229,8 @@ async function main() {
   // what keeps the keyspace bounded by *current* demand.
   const evicted = await sql`
     DELETE FROM roast_reference_prices
-    WHERE last_seen_at < now() - ${`${SEEN_RETENTION_DAYS} days`}::interval
+    WHERE game = ${GAME}
+      AND last_seen_at < now() - ${`${SEEN_RETENTION_DAYS} days`}::interval
   `;
   if (evicted.count > 0) {
     console.log(`Evicted ${evicted.count} rows unseen for ${SEEN_RETENTION_DAYS} days.`);
@@ -244,14 +251,15 @@ async function main() {
   >`
     SELECT reference_fingerprint, slot, base_type, ilvl_min, filters
     FROM roast_reference_prices
-    WHERE league = ${league}
+    WHERE game = ${GAME}
+      AND league = ${league}
       AND (last_refreshed_at IS NULL OR last_refreshed_at < now() - ${`${FRESH_MS} milliseconds`}::interval)
     ORDER BY last_refreshed_at ASC NULLS FIRST, last_seen_at DESC
     LIMIT ${limit}
   `;
 
   const [{ count: total }] = await sql<{ count: string }[]>`
-    SELECT count(*) FROM roast_reference_prices WHERE league = ${league}
+    SELECT count(*) FROM roast_reference_prices WHERE game = ${GAME} AND league = ${league}
   `;
 
   console.log(
@@ -298,7 +306,8 @@ async function main() {
         SET price_chaos = ${sample.floorChaos},
             listing_count = ${sample.listingCount},
             last_refreshed_at = now()
-        WHERE league = ${league}
+        WHERE game = ${GAME}
+          AND league = ${league}
           AND reference_fingerprint = ${row.reference_fingerprint}
           AND slot = ${row.slot}
       `;
@@ -321,7 +330,8 @@ async function main() {
       // app — which is a labelled band, not a wrong number.
       await sql`
         UPDATE roast_reference_prices SET last_refreshed_at = now()
-        WHERE league = ${league}
+        WHERE game = ${GAME}
+          AND league = ${league}
           AND reference_fingerprint = ${row.reference_fingerprint}
           AND slot = ${row.slot}
       `;
