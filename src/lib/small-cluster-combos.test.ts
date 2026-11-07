@@ -29,11 +29,12 @@ describe("smallComboRows", () => {
     },
   ];
 
-  it("keys the row on the notable's name", () => {
+  it("keys the row on PoE 1 and the notable's name", () => {
     // The table's combo_key is the " + "-joined notable list, and a small
     // cluster's list is one name long.
     expect(smallComboRows("Allflame", combos)).toEqual([
       {
+        game: "poe1",
         league: "Allflame",
         enchantment_tag: "affliction_armour",
         jewel_size: "small",

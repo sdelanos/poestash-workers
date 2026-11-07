@@ -19,6 +19,8 @@ export interface SmallCombo {
 }
 
 export interface SmallComboRow {
+  /** Cluster jewels are PoE 1 only; part of the table's key. */
+  game: "poe1";
   league: string;
   enchantment_tag: string;
   jewel_size: "small";
@@ -47,6 +49,7 @@ export function smallComboRows(
   combos: readonly SmallCombo[],
 ): SmallComboRow[] {
   return combos.map((c) => ({
+    game: "poe1",
     league,
     enchantment_tag: c.enchantmentTag,
     jewel_size: "small",

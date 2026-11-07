@@ -30,6 +30,10 @@ import { BlockedError, createPacedFetch } from "./lib/paced-fetch";
 
 const TRADE_BASE = "https://www.pathofexile.com/api/trade";
 
+/** Cluster jewels are PoE 1 only. Written on every row and part of the key, so
+ *  a PoE 2 league sharing a name ("Standard") can never overwrite these. */
+const GAME = "poe1";
+
 /**
  * Opening pace, per *request*, until the first response tells us the real one.
  * Deliberately the old per-combo figure: erring slow costs a few seconds, and
@@ -160,13 +164,13 @@ async function seedLeagueCombos(
   league: string,
 ): Promise<void> {
   const [{ count }] = await sql<{ count: string }[]>`
-    SELECT count(*) FROM cluster_jewel_prices WHERE league = ${league}
+    SELECT count(*) FROM cluster_jewel_prices WHERE game = ${GAME} AND league = ${league}
   `;
   if (Number(count) > 0) return;
 
   const [source] = await sql<{ league: string }[]>`
     SELECT league FROM cluster_jewel_prices
-    WHERE league <> ${league}
+    WHERE game = ${GAME} AND league <> ${league}
     GROUP BY league
     ORDER BY max(last_refreshed_at) DESC NULLS LAST
     LIMIT 1
@@ -180,11 +184,11 @@ async function seedLeagueCombos(
 
   const seeded = await sql`
     INSERT INTO cluster_jewel_prices
-      (league, enchantment_tag, jewel_size, combo_key, notable_names, trade_stat_ids)
-    SELECT ${league}, enchantment_tag, jewel_size, combo_key, notable_names, trade_stat_ids
+      (game, league, enchantment_tag, jewel_size, combo_key, notable_names, trade_stat_ids)
+    SELECT ${GAME}, ${league}, enchantment_tag, jewel_size, combo_key, notable_names, trade_stat_ids
     FROM cluster_jewel_prices
-    WHERE league = ${source.league}
-    ON CONFLICT (league, enchantment_tag, combo_key) DO NOTHING
+    WHERE game = ${GAME} AND league = ${source.league}
+    ON CONFLICT (game, league, enchantment_tag, combo_key) DO NOTHING
   `;
   console.log(
     `Seeded ${seeded.count} combos for ${league} from ${source.league}`,
@@ -207,7 +211,7 @@ async function seedSmallCombos(
   const rows = smallComboRows(league, SMALL_COMBOS);
   const seeded = await sql`
     INSERT INTO cluster_jewel_prices ${sql(rows)}
-    ON CONFLICT (league, enchantment_tag, combo_key) DO NOTHING
+    ON CONFLICT (game, league, enchantment_tag, combo_key) DO NOTHING
   `;
   if (seeded.count > 0) {
     console.log(`Seeded ${seeded.count} small combos for ${league}`);
@@ -253,10 +257,11 @@ async function main() {
   await seedLeagueCombos(sql, league);
   await seedSmallCombos(sql, league);
 
-  // Build currency conversion map
+  // Build currency conversion map. By game too: PoE 2's "Standard" has its own
+  // Divine Orb, and without the filter whichever row came back last set the rate.
   const currencyRows = await sql`
     SELECT item_name, chaos_value, source FROM ninja_prices
-    WHERE league = ${league} AND ninja_category = 'Currency'
+    WHERE game = ${GAME} AND league = ${league} AND ninja_category = 'Currency'
   `;
   // Deduplicate: prefer exchange source
   const seen = new Map<string, { chaos_value: number; source: string }>();
@@ -276,7 +281,7 @@ async function main() {
 
   // Count targets
   const [{ count: targetCount }] = await sql`
-    SELECT count(*) FROM cluster_jewel_prices WHERE league = ${league}
+    SELECT count(*) FROM cluster_jewel_prices WHERE game = ${GAME} AND league = ${league}
   `;
 
   // No ETA: the pace comes from the rate-limit headers and retunes as they
@@ -298,7 +303,8 @@ async function main() {
     const [combo] = await sql`
       SELECT league, enchantment_tag, jewel_size, combo_key, trade_stat_ids, listing_count, last_refreshed_at
       FROM cluster_jewel_prices
-      WHERE league = ${league}
+      WHERE game = ${GAME}
+        AND league = ${league}
         AND (last_refreshed_at IS NULL
           OR listing_count IS NULL
           OR (listing_count > 0 AND last_refreshed_at < NOW() - INTERVAL '24 hours')
@@ -336,7 +342,8 @@ async function main() {
         SET min_price_chaos = ${result.minPriceChaos},
             listing_count = ${result.listingCount},
             last_refreshed_at = NOW()
-        WHERE league = ${league}
+        WHERE game = ${GAME}
+          AND league = ${league}
           AND enchantment_tag = ${combo.enchantment_tag}
           AND combo_key = ${combo.combo_key}
       `;
