@@ -12,7 +12,7 @@
  *
  * Designed to run daily via GitHub Actions cron. One poe.watch currency call
  * per league; the ~100 "Scrying Orb (<map area>)" variants become one row per
- * (league, map_name) in scrying_orb_prices.
+ * (game, league, map_name) in scrying_orb_prices.
  *
  * Orbs are not Currency Exchange items, so poe.ninja never carries them —
  * poe.watch is the sole source. Rows are never deleted by this worker: a
@@ -38,17 +38,22 @@ import {
 
 const POE_WATCH_BASE = "https://api.poe.watch";
 
+/** poe.watch prices PoE 1 only. Written on every row and part of the key, so a
+ *  PoE 2 league sharing a name ("Standard") can never overwrite these. */
+const GAME = "poe1";
+
 // ---------------------------------------------------------------------------
 // Row mapping
 // ---------------------------------------------------------------------------
 
 const COLUMNS = [
-  "league", "map_name", "mean_chaos", "daily_sold", "low_confidence",
+  "game", "league", "map_name", "mean_chaos", "daily_sold", "low_confidence",
   "last_refreshed_at",
 ] as const;
 
 function toDbRow(row: ScryingOrbRow, league: string, now: Date) {
   return {
+    game: GAME,
     league,
     map_name: row.mapArea,
     mean_chaos: row.mean,
@@ -104,7 +109,7 @@ async function refreshOneLeague(
 
   await sql`
     INSERT INTO scrying_orb_prices ${sql(dbRows, ...COLUMNS)}
-    ON CONFLICT (league, map_name) DO UPDATE SET
+    ON CONFLICT (game, league, map_name) DO UPDATE SET
       mean_chaos = EXCLUDED.mean_chaos,
       daily_sold = EXCLUDED.daily_sold,
       low_confidence = EXCLUDED.low_confidence,
