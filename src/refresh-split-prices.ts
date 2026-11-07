@@ -44,6 +44,10 @@ import { resolveTradeLeague } from "./lib/trade-league";
 // ---------------------------------------------------------------------------
 
 const TRADE_BASE = "https://www.pathofexile.com/api/trade";
+
+/** Splitting is PoE 1 only. Written on every row and part of the key, so a
+ *  PoE 2 league sharing a name ("Standard") can never overwrite these. */
+const GAME = "poe1";
 // Rate limits: 5/10s, 15/60s, 30/300s. 30/300s binds. One request per ~10s.
 const PAUSE_MS = 10_000;
 const SAMPLE_SIZE = 10;
@@ -228,7 +232,7 @@ async function main() {
   const ingredientNames = Object.values(SPLIT_INGREDIENTS);
   const priceRows = await sql<{ item_name: string; chaos_value: number; source: string }[]>`
     SELECT item_name, chaos_value, source FROM ninja_prices
-    WHERE game = 'poe1' AND league = ${league}
+    WHERE game = ${GAME} AND league = ${league}
       AND (ninja_category = 'Currency' OR item_name = ANY(${ingredientNames}))
   `;
   const best = new Map<string, number>();
@@ -268,7 +272,7 @@ async function main() {
     }[]
   >`
     SELECT base_type, quality_band, clean_price_chaos, split_price_chaos, last_refreshed_at
-    FROM split_base_prices WHERE league = ${league}
+    FROM split_base_prices WHERE game = ${GAME} AND league = ${league}
   `;
   const stateByKey = new Map<string, { clean: number | null; split: number | null; at: Date | null }>();
   for (const r of existing) {
@@ -357,12 +361,12 @@ async function main() {
 
       await sql`
         INSERT INTO split_base_prices
-          (league, base_type, item_class, ilvl_floor, quality_band,
+          (game, league, base_type, item_class, ilvl_floor, quality_band,
            clean_price_chaos, clean_listing_count, split_price_chaos, split_listing_count, last_refreshed_at)
         VALUES
-          (${league}, ${dbBaseType}, ${m.base.itemClass}, ${SPLIT_ILVL_FLOOR}, ${m.band.key},
+          (${GAME}, ${league}, ${dbBaseType}, ${m.base.itemClass}, ${SPLIT_ILVL_FLOOR}, ${m.band.key},
            ${buy.floorChaos}, ${buy.listingCount}, ${sell.floorChaos}, ${sell.listingCount}, NOW())
-        ON CONFLICT (league, base_type, ilvl_floor, quality_band) DO UPDATE SET
+        ON CONFLICT (game, league, base_type, ilvl_floor, quality_band) DO UPDATE SET
           item_class = EXCLUDED.item_class,
           clean_price_chaos = EXCLUDED.clean_price_chaos,
           clean_listing_count = EXCLUDED.clean_listing_count,
@@ -389,7 +393,7 @@ async function main() {
       // shouldn't wipe good data).
       await sql`
         UPDATE split_base_prices SET last_refreshed_at = NOW()
-        WHERE league = ${league} AND base_type = ${dbBaseType}
+        WHERE game = ${GAME} AND league = ${league} AND base_type = ${dbBaseType}
           AND ilvl_floor = ${SPLIT_ILVL_FLOOR} AND quality_band = ${m.band.key}
       `;
       processed++;
