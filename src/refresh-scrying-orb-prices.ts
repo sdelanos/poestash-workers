@@ -19,13 +19,16 @@
  * poe.watch outage leaves prior rows intact and exits non-zero for visibility,
  * and staleness is surfaced app-side from last_refreshed_at.
  *
- * Requires DATABASE_URL environment variable (not needed for --dry-run).
+ * Requires DATABASE_URL environment variable (not needed for --dry-run). POESTASH_APP_URL and CRON_SECRET
+ * for the app call after the write (lib/revalidate-app.ts; optional: unset
+ * skips it, a failed call only logs).
  */
 
 import "dotenv/config";
 import postgres from "postgres";
 import { discoverPoeWatchLeagues } from "./lib/poe-watch-leagues";
 import { selectPricedSet } from "./lib/priced-set";
+import { revalidateAppPrices } from "./lib/revalidate-app";
 import {
   selectScryingOrbRows,
   type PoeWatchCurrencyItem,
@@ -188,6 +191,9 @@ async function main() {
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   const verb = dryRun ? "would upsert" : "upserted";
   console.log(`Done in ${elapsed}s${dryRun ? " (dry-run)" : ""}, ${verb} ${totalUpserted} rows`);
+
+  // Even when another league failed: the ones written are worth showing now.
+  if (!dryRun && totalUpserted > 0) await revalidateAppPrices("poe1");
 
   if (firstError != null) process.exit(1);
 }

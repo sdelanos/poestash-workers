@@ -14,7 +14,13 @@
  * Designed to be run multiple times per day via cron. Each run processes
  * combos oldest-first and stops when all are within the 24h staleness window.
  *
+ * Tells the app its PoE 1 prices changed (lib/revalidate-app.ts) at most every
+ * REVALIDATE_EVERY_MS while combos are being written, and once more when the
+ * loop ends: a run usually ends on the workflow's timeout, which kills it
+ * before main() could. A failed call only logs.
+ *
  * Requires DATABASE_URL and POE_CLIENT_ID environment variables.
+ * POESTASH_APP_URL and CRON_SECRET for the app call (optional: unset skips it).
  */
 
 import "dotenv/config";
@@ -23,6 +29,7 @@ import { SMALL_COMBOS, smallComboRows } from "./lib/small-cluster-combos";
 import { resolveTradeLeague } from "./lib/trade-league";
 import { buildComboSearchQuery, type JewelSize } from "./lib/cluster-query";
 import { BlockedError, createPacedFetch } from "./lib/paced-fetch";
+import { revalidateAppPrices } from "./lib/revalidate-app";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -36,6 +43,9 @@ const TRADE_BASE = "https://www.pathofexile.com/api/trade";
  * erring fast costs an hour (#7).
  */
 const DEFAULT_INTERVAL_MS = 10_000;
+
+/** How often a run tells the app about the combos it wrote since the last call. */
+const REVALIDATE_EVERY_MS = 30 * 60_000;
 
 const CURRENCY_SLUGS: Record<string, string> = {
   chaos: "chaos orb",
@@ -291,6 +301,8 @@ async function main() {
   let errors = 0;
   const failedThisRun: string[] = [];
   const startTime = Date.now();
+  let writtenSinceRevalidate = 0;
+  let lastRevalidateAt = startTime;
 
   while (!stopping) {
     // Combos with listings: refresh every 24h
@@ -342,7 +354,14 @@ async function main() {
       `;
 
       processed++;
+      writtenSinceRevalidate++;
       if (result.listingCount > 0) withListings++;
+
+      if (Date.now() - lastRevalidateAt >= REVALIDATE_EVERY_MS) {
+        await revalidateAppPrices("poe1");
+        writtenSinceRevalidate = 0;
+        lastRevalidateAt = Date.now();
+      }
 
       const price = result.minPriceChaos != null ? `${result.minPriceChaos.toFixed(1)}c` : "—";
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
@@ -373,6 +392,7 @@ async function main() {
   console.log(`\nDone! Processed ${processed} combos in ${elapsed} min (${withListings} with listings, ${errors} errors, ${rateLimitHits} rate limit hits)`);
 
   await sql.end();
+  if (writtenSinceRevalidate > 0) await revalidateAppPrices("poe1");
 }
 
 main().catch((err) => {

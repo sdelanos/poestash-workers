@@ -24,6 +24,11 @@ jobs:
     timeout-minutes: 5
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      # The app call after the write (src/lib/revalidate-app.ts). The URL is
+      # the switch, unset skips it: PoeStash 1.x has no revalidate route, so it
+      # waits for 2.0's cut-over. A failed call warns, never fails the run.
+      POESTASH_APP_URL: ${{ vars.POESTASH_APP_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
