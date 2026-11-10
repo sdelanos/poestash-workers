@@ -128,7 +128,7 @@ dropped rather than parsed.
 ### The Warrant corpus
 
 **Corpus row**:
-One `(league, support_hash, tier)` contrast — never one row per observed
+One `(game, league, support_hash, tier)` contrast — never one row per observed
 Warrant. A per-observation log would be ~1.25M rows and ~500MB a day at the
 measured rate; the pair key collapses that to a few hundred rows a league,
 overwritten in place, flat however long the worker runs.

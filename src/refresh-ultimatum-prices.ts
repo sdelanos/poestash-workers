@@ -36,6 +36,10 @@ import { revalidateAppPrices } from "./lib/revalidate-app";
 const BATCH_SIZE = 500;
 const POE_WATCH_BASE = "https://api.poe.watch";
 
+/** poe.watch prices PoE 1 only. Written on every row and part of the key, so a
+ *  PoE 2 league sharing a name ("Standard") can never overwrite these. */
+const GAME = "poe1";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -58,7 +62,7 @@ interface PoeWatchInscribed {
 // ---------------------------------------------------------------------------
 
 const COLUMNS = [
-  "league", "combo_key", "challenge", "reward", "reward_amount",
+  "game", "league", "combo_key", "challenge", "reward", "reward_amount",
   "sacrifice", "sacrifice_amount", "mean_chaos", "divine_value",
   "reward_price", "sacrifice_price", "low_confidence", "updated_at",
 ] as const;
@@ -69,6 +73,7 @@ function buildComboKey(item: PoeWatchInscribed): string {
 
 function toDbRow(item: PoeWatchInscribed, league: string, now: Date) {
   return {
+    game: GAME,
     league,
     combo_key: buildComboKey(item),
     challenge: item.challenge,
@@ -133,7 +138,7 @@ async function refreshOneLeague(
 
     await sql`
       INSERT INTO ultimatum_prices ${sql(dbRows, ...COLUMNS)}
-      ON CONFLICT (league, combo_key) DO UPDATE SET
+      ON CONFLICT (game, league, combo_key) DO UPDATE SET
         challenge = EXCLUDED.challenge,
         reward = EXCLUDED.reward,
         reward_amount = EXCLUDED.reward_amount,

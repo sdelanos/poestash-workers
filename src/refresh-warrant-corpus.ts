@@ -83,6 +83,11 @@ const MIN_LEAGUE_SAMPLE = 100;
 
 const BATCH_SIZE = 500;
 
+/** The public stash river and Mercenary Warrants are PoE 1. Written on every
+ *  row and part of the key, so a PoE 2 league sharing a name ("Standard") can
+ *  never overwrite these. */
+const GAME = "poe1";
+
 /** GGG's price slug → the poe.ninja `item_name` that carries its chaos rate.
  *  Only what actually shows up on Warrants: chaos, divine and mirror were the
  *  whole distribution in a 714-Warrant sample, with exalted and annul added
@@ -99,7 +104,7 @@ const CURRENCY_SLUGS: Record<string, string> = {
 const userAgent = `OAuth ${process.env.POE_CLIENT_ID ?? "poestashapp"}/1.0.0 (contact: contact@poestash.com)`;
 
 const COLUMNS = [
-  "league", "support_hash", "support_name", "tier", "sample_count",
+  "game", "league", "support_hash", "support_name", "tier", "sample_count",
   "median_chaos", "p25_chaos", "p75_chaos", "baseline_count",
   "baseline_median_chaos", "separation_auc", "stratified_auc", "strata_count",
   "strata_above", "league_sample_count", "updated_at",
@@ -199,7 +204,7 @@ async function loadChaosRates(
   const names = Object.values(CURRENCY_SLUGS);
   const rows = await sql<{ league: string; item_name: string; chaos_value: number; source: string }[]>`
     SELECT league, item_name, chaos_value, source FROM ninja_prices
-    WHERE game = 'poe1' AND league = ANY(${leagues}) AND item_name = ANY(${names})
+    WHERE game = ${GAME} AND league = ANY(${leagues}) AND item_name = ANY(${names})
   `;
 
   const best = new Map<string, number>();
@@ -363,6 +368,7 @@ async function main() {
     const now = new Date();
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE).map((r) => ({
+        game: GAME,
         league: r.league,
         support_hash: r.supportHash,
         support_name: r.supportName,
@@ -387,7 +393,7 @@ async function main() {
       // The sweep below finishes the job for pairs this run did not see.
       await sql`
         INSERT INTO warrant_support_price_samples ${sql(batch, ...COLUMNS)}
-        ON CONFLICT (league, support_hash, tier) DO UPDATE SET
+        ON CONFLICT (game, league, support_hash, tier) DO UPDATE SET
           support_name = EXCLUDED.support_name,
           sample_count = EXCLUDED.sample_count,
           median_chaos = EXCLUDED.median_chaos,
@@ -415,7 +421,7 @@ async function main() {
     for (const league of kept) {
       const gone = await sql`
         DELETE FROM warrant_support_price_samples
-        WHERE league = ${league} AND updated_at < ${now}
+        WHERE game = ${GAME} AND league = ${league} AND updated_at < ${now}
       `;
       swept += gone.count;
     }

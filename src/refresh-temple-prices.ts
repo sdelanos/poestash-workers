@@ -34,6 +34,10 @@ import { revalidateAppPrices } from "./lib/revalidate-app";
 
 const TRADE_BASE = "https://www.pathofexile.com/api/trade";
 
+/** The Temple is PoE 1 only. Written on every row and part of the key, so a
+ *  PoE 2 league sharing a name ("Standard") can never overwrite these. */
+const GAME = "poe1";
+
 /** Number of cheapest listings to consider when computing the median. */
 const SAMPLE_SIZE = 10;
 
@@ -58,7 +62,7 @@ const OPEN_ROOM_OPTION = "1";
 const userAgent = `OAuth ${process.env.POE_CLIENT_ID ?? "poestashapp"}/1.0.0 (contact: contact@poestash.com)`;
 
 interface TempleRoom {
-  /** Stable key stored in the DB row (composite PK with league). */
+  /** Stable key stored in the DB row (composite PK with game and league). */
   roomKey: string;
   /** Trade pseudo stat id used in the search query. */
   tradeStatId: string;
@@ -226,7 +230,7 @@ async function resolveLeagues(
 
   const rows = await sql<{ league: string }[]>`
     SELECT DISTINCT league FROM ninja_price_meta
-    WHERE game = 'poe1' AND last_refreshed_at > NOW() - INTERVAL '1 day'
+    WHERE game = ${GAME} AND last_refreshed_at > NOW() - INTERVAL '1 day'
   `;
   const leagues = rows.map((r) => r.league);
   if (leagues.length === 0) {
@@ -245,12 +249,14 @@ async function resolveLeagues(
 async function refreshLeague(sql: postgres.Sql, league: string): Promise<number> {
   const start = Date.now();
 
-  // 1. Build currency conversion map (exchange source wins over stash).
+  // 1. Build currency conversion map (exchange source wins over stash). By
+  //    game too: PoE 2's "Standard" has its own Divine Orb, and without the
+  //    filter whichever row came back last set the rate.
   const currencyRows = await sql<
     { item_name: string; chaos_value: number; source: string }[]
   >`
     SELECT item_name, chaos_value, source FROM ninja_prices
-    WHERE league = ${league} AND ninja_category = 'Currency'
+    WHERE game = ${GAME} AND league = ${league} AND ninja_category = 'Currency'
   `;
   const seen = new Map<string, { chaos_value: number; source: string }>();
   for (const r of currencyRows) {
@@ -296,6 +302,7 @@ async function refreshLeague(sql: postgres.Sql, league: string): Promise<number>
 
       await sql`
         INSERT INTO temple_prices ${sql({
+          game: GAME,
           league,
           room_key: room.roomKey,
           trade_stat_id: room.tradeStatId,
@@ -305,7 +312,7 @@ async function refreshLeague(sql: postgres.Sql, league: string): Promise<number>
           sample_size: chaosPrices.length,
           last_refreshed_at: new Date(),
         })}
-        ON CONFLICT (league, room_key) DO UPDATE SET
+        ON CONFLICT (game, league, room_key) DO UPDATE SET
           trade_stat_id = EXCLUDED.trade_stat_id,
           median_price_chaos = EXCLUDED.median_price_chaos,
           min_price_chaos = EXCLUDED.min_price_chaos,
