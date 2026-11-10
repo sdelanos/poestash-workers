@@ -36,6 +36,18 @@ describe("fetchAllNinjaPrices", () => {
     expect(failedCategories.sort()).toEqual(["exchange:Scarab", "stash:Scarab"]);
   });
 
+  // Delisting marks only from feeds poe.ninja answered: a failed one must never
+  // read as an answer that left every row out.
+  it("lists the feeds answered, a 404 included, a failed one left out", async () => {
+    stubNinja({ divine: true, failing: "Scarab" });
+    const { answered } = await fetchAllNinjaPrices("poe1", "Hardcore");
+    const keys = answered.map((f) => `${f.source}:${f.category}`);
+    expect(keys).toContain("stash:Fossil");
+    expect(keys).toContain("exchange:Currency");
+    expect(keys).not.toContain("stash:Scarab");
+    expect(keys).not.toContain("exchange:Scarab");
+  });
+
   // Permanent Hardcore misses both divine lookups about 4 runs in 10; the run
   // then wrote divine_rate = 0 over the good stored rate.
   it("keeps the last known divine rate when poe.ninja gives none", async () => {

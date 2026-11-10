@@ -10,6 +10,11 @@ export const COLUMNS = [
   "exalted_value", "count", "volume", "mutated_modifiers",
   "flavour_text", "implicit_modifiers", "property_modifiers", "requirement_modifiers",
   "pay_value", "receive_value", "pay_listing_count", "receive_listing_count",
+  // Written null on every upsert: a data column like the others, so a row
+  // marked delisted (./ninja-delisting.ts) that poe.ninja lists again differs
+  // and is rewritten unmarked, while an unmarked row that didn't change still
+  // isn't touched.
+  "delisted_at",
   "updated_at",
 ] as const;
 

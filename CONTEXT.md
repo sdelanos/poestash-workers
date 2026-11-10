@@ -77,6 +77,14 @@ like a plausible small number, so the inversion is killed at the ingestion
 boundary, in a pure function, pinned by tests against a captured payload.
 Nothing downstream of this worker ever sees a per-chaos rate.
 
+**Delisted row**:
+A `ninja_prices` row whose feed poe.ninja answered in full without it: marked
+`delisted_at`, never deleted, and unmarked the run it comes back. The only
+"no longer listed" signal, since `updated_at` moves only when a row's figures
+change and most base types and gems sit unchanged for days. A short answer
+(empty, or under half the type's listed rows) marks nothing.
+_Avoid_: stale row (a stale row may still be listed).
+
 **Ingestion reports, the strategy judges**:
 The spread columns are written verbatim. The live feed carries 90%-plus
 spreads on vendor-tier currency, crossed quotes on thin pairs (Ancient Orb:
