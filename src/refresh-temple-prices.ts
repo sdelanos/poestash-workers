@@ -18,12 +18,15 @@
  * so 2 trade API calls per league per run, each paced by the rate-limit
  * headers (lib/paced-fetch.ts).
  *
- * Requires DATABASE_URL and POE_CLIENT_ID environment variables.
+ * Requires DATABASE_URL and POE_CLIENT_ID environment variables. POESTASH_APP_URL and CRON_SECRET
+ * for the app call after the write (lib/revalidate-app.ts; optional: unset
+ * skips it, a failed call only logs).
  */
 
 import "dotenv/config";
 import postgres from "postgres";
 import { BlockedError, createPacedFetch } from "./lib/paced-fetch";
+import { revalidateAppPrices } from "./lib/revalidate-app";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -238,7 +241,8 @@ async function resolveLeagues(
 // Per-league refresh
 // ---------------------------------------------------------------------------
 
-async function refreshLeague(sql: postgres.Sql, league: string): Promise<void> {
+/** Returns how many rooms it wrote. */
+async function refreshLeague(sql: postgres.Sql, league: string): Promise<number> {
   const start = Date.now();
 
   // 1. Build currency conversion map (exchange source wins over stash).
@@ -332,6 +336,7 @@ async function refreshLeague(sql: postgres.Sql, league: string): Promise<void> {
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(`[${league}] Done in ${elapsed}s — ${updated}/${ROOMS.length} rooms updated`);
+  return updated;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,13 +360,14 @@ async function main() {
   });
 
   let firstError: unknown = null;
+  let roomsWritten = 0;
 
   try {
     const leagues = await resolveLeagues(sql, explicit);
 
     for (const league of leagues) {
       try {
-        await refreshLeague(sql, league);
+        roomsWritten += await refreshLeague(sql, league);
       } catch (err) {
         // A block is per runner, not per league: the next league would hit it too.
         if (err instanceof BlockedError) throw err;
@@ -372,6 +378,9 @@ async function main() {
     }
   } finally {
     await sql.end();
+    // In the finally so a blocked runner's rooms written before the block show
+    // too. Even when another league failed.
+    if (roomsWritten > 0) await revalidateAppPrices("poe1");
   }
 
   if (firstError != null) process.exit(1);

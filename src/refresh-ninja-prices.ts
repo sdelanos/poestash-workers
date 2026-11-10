@@ -30,7 +30,11 @@
  * freshness comes from ninja_price_meta.last_refreshed_at, which is still
  * bumped on every run.
  *
- * Requires DATABASE_URL environment variable.
+ * After a run that wrote at least one league, tells the app the game's prices
+ * changed (lib/revalidate-app.ts): a failed call logs and never fails the run.
+ *
+ * Requires DATABASE_URL environment variable. POESTASH_APP_URL and CRON_SECRET
+ * for the app call (optional: unset skips it).
  */
 
 import "dotenv/config";
@@ -40,8 +44,7 @@ import { fetchAllPoe2Prices } from "./lib/ninja-fetcher-poe2";
 import { discoverPoe1Leagues, discoverPoe2Leagues } from "./lib/ninja-leagues";
 import type { NinjaFetchedItem } from "./lib/ninja-types";
 import { COLUMNS, UPSERT_CLAUSE } from "./lib/ninja-upsert";
-
-type Game = "poe1" | "poe2";
+import { type Game, revalidateAppPrices } from "./lib/revalidate-app";
 
 function isGame(value: string): value is Game {
   return value === "poe1" || value === "poe2";
@@ -118,7 +121,7 @@ async function refreshOneLeague(
   sql: postgres.Sql,
   game: Game,
   league: string,
-): Promise<{ upserted: number; divineRate: number }> {
+): Promise<{ upserted: number; divineRate: number; failedCategories: string[] }> {
   const start = Date.now();
 
   console.log(`Fetching ${game}/${league} prices from poe.ninja...`);
@@ -135,7 +138,7 @@ async function refreshOneLeague(
       console.log(
         `${game}/${league}: listed on poe.ninja but not priced yet (pre-launch) — skipping.`,
       );
-      return { upserted: 0, divineRate: 0 };
+      return { upserted: 0, divineRate: 0, failedCategories: [] };
     }
     ({ rows, divineRate, failedCategories } = result);
   } else {
@@ -212,13 +215,7 @@ async function refreshOneLeague(
     `  done in ${elapsed}s — ${written} of ${valid.length} rows written (rest unchanged)`,
   );
 
-  // Thrown only after the write: what did arrive is still worth keeping, but
-  // a run that lost categories must not end green.
-  if (failedCategories.length > 0) {
-    throw new Error(`${failedCategories.length} categories failed: ${failedCategories.join(", ")}`);
-  }
-
-  return { upserted: valid.length, divineRate };
+  return { upserted: valid.length, divineRate, failedCategories };
 }
 
 async function resolveLeagues(game: Game, league: string): Promise<string[]> {
@@ -272,13 +269,20 @@ async function main() {
 
   const overallStart = Date.now();
   let firstError: unknown = null;
+  let leaguesWritten = 0;
 
   try {
     const leagues = await resolveLeagues(game, league);
 
     for (const l of leagues) {
       try {
-        await refreshOneLeague(sql, game, l);
+        const { upserted, failedCategories } = await refreshOneLeague(sql, game, l);
+        if (upserted > 0) leaguesWritten++;
+        // Failed only after the write: what did arrive is still worth keeping
+        // (and showing), but a run that lost categories must not end green.
+        if (failedCategories.length > 0) {
+          throw new Error(`${failedCategories.length} categories failed: ${failedCategories.join(", ")}`);
+        }
       } catch (err) {
         console.error(`Failed ${game}/${l}:`, err);
         // Remember the first failure but keep going so one bad league does
@@ -292,6 +296,9 @@ async function main() {
 
   const elapsed = ((Date.now() - overallStart) / 1000).toFixed(1);
   console.log(`All done in ${elapsed}s`);
+
+  // Even when another league failed: the ones written are worth showing now.
+  if (leaguesWritten > 0) await revalidateAppPrices(game);
 
   if (firstError != null) process.exit(1);
 }

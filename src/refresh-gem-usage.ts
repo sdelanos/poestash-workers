@@ -15,7 +15,9 @@
  * three URLs from poe.ninja per league (~225 KB), decodes the protobuf, and
  * upserts ~800 rows into the `ninja_gem_usage` table.
  *
- * Requires DATABASE_URL environment variable.
+ * Requires DATABASE_URL environment variable. POESTASH_APP_URL and CRON_SECRET
+ * for the app call after the write (lib/revalidate-app.ts; optional: unset
+ * skips it, a failed call only logs).
  */
 
 import "dotenv/config";
@@ -27,6 +29,7 @@ import {
 } from "./lib/poeninja-builds";
 import { discoverPoe1Leagues } from "./lib/ninja-leagues";
 import { selectPricedSet } from "./lib/priced-set";
+import { revalidateAppPrices } from "./lib/revalidate-app";
 
 const GAME = "poe1";
 
@@ -107,7 +110,8 @@ type BuildLeague = { url: string; name: string; version: string };
  * implausibly small response, both are transient, not run-failing. Throws on
  * a genuine poe.ninja error so the run fails loud.
  */
-async function refreshOneLeague(sql: postgres.Sql, match: BuildLeague): Promise<void> {
+/** Returns whether it wrote the league. */
+async function refreshOneLeague(sql: postgres.Sql, match: BuildLeague): Promise<boolean> {
   console.log(
     `[gem-usage] ${match.name}: snapshot version ${match.version} (url: ${match.url})`,
   );
@@ -125,7 +129,7 @@ async function refreshOneLeague(sql: postgres.Sql, match: BuildLeague): Promise<
       console.warn(
         `[gem-usage] snapshot ${match.version} for league=${match.name} returned 404, skipping (likely a low-population variant or a stale index-state). ${msg}`,
       );
-      return;
+      return false;
     }
     throw err;
   }
@@ -145,7 +149,7 @@ async function refreshOneLeague(sql: postgres.Sql, match: BuildLeague): Promise<
     console.warn(
       `[gem-usage] ${match.name}: decoded only ${result.counts.size} gems (< ${MIN_PLAUSIBLE_GEM_COUNT} threshold), skipping DB write to avoid pruning healthy data on a flaky response.`,
     );
-    return;
+    return false;
   }
 
   const now = new Date();
@@ -161,6 +165,7 @@ async function refreshOneLeague(sql: postgres.Sql, match: BuildLeague): Promise<
 
   const pruned = await pruneStale(sql, GAME, result.league, result.snapshotVersion);
   console.log(`[gem-usage] ${match.name}: pruned ${pruned} stale rows`);
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,10 +250,11 @@ async function main() {
   });
 
   let firstError: unknown = null;
+  let leaguesWritten = 0;
   try {
     for (const match of targets) {
       try {
-        await refreshOneLeague(sql, match);
+        if (await refreshOneLeague(sql, match)) leaguesWritten++;
       } catch (err) {
         console.error(
           `[gem-usage] ${match.name} failed:`,
@@ -261,6 +267,9 @@ async function main() {
   } finally {
     await sql.end({ timeout: 5 });
   }
+
+  // Even when another league failed: the ones written are worth showing now.
+  if (leaguesWritten > 0) await revalidateAppPrices(GAME);
 
   if (firstError != null) process.exit(1);
 }
