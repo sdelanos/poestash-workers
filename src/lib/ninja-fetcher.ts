@@ -11,6 +11,7 @@ import {
   EXCHANGE_CANONICAL_TYPES,
 } from "./ninja-types";
 import { mapStashCurrencyRows } from "./stash-currency-rows";
+import type { NinjaFeed } from "./ninja-delisting";
 
 const NINJA_BASE = "https://poe.ninja/poe1/api/economy";
 const POECDN_BASE = "https://web.poecdn.com";
@@ -162,7 +163,14 @@ export async function fetchAllNinjaPrices(
   league: string,
   /** The rate stored by the last run, used when both lookups below miss. */
   previousDivineRate = 0,
-): Promise<{ rows: NinjaFetchedItem[]; divineRate: number; failedCategories: string[] }> {
+): Promise<{
+  rows: NinjaFetchedItem[];
+  divineRate: number;
+  failedCategories: string[];
+  /** The feeds poe.ninja answered (a 404 or an empty body included), what
+   *  delisting may mark from. A failed feed is in `failedCategories` only. */
+  answered: NinjaFeed[];
+}> {
   // Step 1: Get divine rate from exchange (most accurate bulk price)
   let divineRate = 0;
   try {
@@ -214,33 +222,37 @@ export async function fetchAllNinjaPrices(
   // per refresh.
   const fetches: Promise<NinjaFetchedItem[]>[] = [];
   const failedCategories: string[] = [];
-  const recordFailure = (category: string) => (err: unknown) => {
-    console.error(`  ${category} failed: ${err instanceof Error ? err.message : err}`);
-    failedCategories.push(category);
-    return [] as NinjaFetchedItem[];
-  };
+  const answered: NinjaFeed[] = [];
+  const settle = (feed: NinjaFeed, request: Promise<NinjaFetchedItem[]>) =>
+    request.then(
+      (rows) => {
+        answered.push(feed);
+        return rows;
+      },
+      (err: unknown) => {
+        const category = `${feed.source}:${feed.category}`;
+        console.error(`  ${category} failed: ${err instanceof Error ? err.message : err}`);
+        failedCategories.push(category);
+        return [] as NinjaFetchedItem[];
+      },
+    );
 
   for (const type of ALL_NINJA_TYPES) {
     // Stash: use currency-format or item-format based on type
-    if (STASH_CURRENCY_FORMAT.has(type)) {
-      fetches.push(
-        fetchStashCurrency(game, league, type, divineRate).catch(recordFailure(`stash:${type}`)),
-      );
-    } else {
-      fetches.push(
-        fetchStashItems(game, league, type, divineRate).catch(recordFailure(`stash:${type}`)),
-      );
-    }
+    const stash = STASH_CURRENCY_FORMAT.has(type)
+      ? fetchStashCurrency(game, league, type, divineRate)
+      : fetchStashItems(game, league, type, divineRate);
+    fetches.push(settle({ source: "stash", category: type }, stash));
 
     // Exchange: only worth firing for canonical-exchange types
     if (EXCHANGE_CANONICAL_TYPES.has(type)) {
       fetches.push(
-        fetchExchange(game, league, type, divineRate).catch(recordFailure(`exchange:${type}`)),
+        settle({ source: "exchange", category: type }, fetchExchange(game, league, type, divineRate)),
       );
     }
   }
 
   const results = await Promise.all(fetches);
 
-  return { rows: results.flat(), divineRate, failedCategories };
+  return { rows: results.flat(), divineRate, failedCategories, answered };
 }

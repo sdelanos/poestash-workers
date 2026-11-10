@@ -18,17 +18,21 @@
  * Fired every 30 minutes by the poestash vercel.json cron (ADR 0063).
  * Each run does a full refresh: fetch all categories, batch upsert.
  *
- * Rows are never deleted by this worker. poe.ninja serves low-volume
- * items intermittently — a row that drops out of one response is usually
- * back in the next. Keeping the last-known price (with whatever updated_at
- * it has) is strictly better than serving 0c. League-level staleness is
- * tracked in ninja_price_meta.last_refreshed_at.
+ * Rows are never deleted by this worker. A row poe.ninja's full answer for
+ * its feed left out is marked `delisted_at` instead (lib/ninja-delisting.ts),
+ * which the app reads as no longer priced, and the upsert clears the mark
+ * when the row comes back. League-level staleness is tracked in
+ * ninja_price_meta.last_refreshed_at.
  *
  * A row is only rewritten when its data changed (see UPSERT_CLAUSE), so
  * ninja_prices.updated_at means "last time this row's data changed", not
- * "last seen in the feed". The poestash app never reads that column;
- * freshness comes from ninja_price_meta.last_refreshed_at, which is still
+ * "last seen in the feed": `delisted_at` is the "no longer listed" signal.
+ * Freshness comes from ninja_price_meta.last_refreshed_at, which is still
  * bumped on every run.
+ *
+ * NINJA_DELIST_MIN_RATIO (optional, 0 to 1, default 0.5): below this share of
+ * a type's listed rows, an answer marks nothing. 0 for the one-off backfill
+ * (README).
  *
  * After a run that wrote at least one league, tells the app the game's prices
  * changed (lib/revalidate-app.ts): a failed call logs and never fails the run.
@@ -41,6 +45,7 @@ import "dotenv/config";
 import postgres from "postgres";
 import { fetchAllNinjaPrices } from "./lib/ninja-fetcher";
 import { fetchAllPoe2Prices } from "./lib/ninja-fetcher-poe2";
+import { delistMinRatio, markDelisted, type NinjaFeed } from "./lib/ninja-delisting";
 import { discoverPoe1Leagues, discoverPoe2Leagues } from "./lib/ninja-leagues";
 import type { NinjaFetchedItem } from "./lib/ninja-types";
 import { COLUMNS, UPSERT_CLAUSE } from "./lib/ninja-upsert";
@@ -109,6 +114,8 @@ function toDbRow(row: NinjaFetchedItem, now: Date) {
     receive_value: row.receiveValue ?? null,
     pay_listing_count: row.payListingCount ?? null,
     receive_listing_count: row.receiveListingCount ?? null,
+    // Listed again: clears a mark (lib/ninja-delisting.ts).
+    delisted_at: null,
     updated_at: now,
   };
 }
@@ -128,6 +135,7 @@ async function refreshOneLeague(
   let rows: NinjaFetchedItem[];
   let divineRate: number;
   let failedCategories: string[] = [];
+  let answered: NinjaFeed[] = [];
   if (game === "poe2") {
     const result = await fetchAllPoe2Prices(league);
     if (result == null) {
@@ -140,12 +148,12 @@ async function refreshOneLeague(
       );
       return { upserted: 0, divineRate: 0, failedCategories: [] };
     }
-    ({ rows, divineRate, failedCategories } = result);
+    ({ rows, divineRate, failedCategories, answered } = result);
   } else {
     const [previous] = await sql<{ divine_rate: number }[]>`
       SELECT divine_rate FROM ninja_price_meta WHERE game = ${game} AND league = ${league}
     `;
-    ({ rows, divineRate, failedCategories } = await fetchAllNinjaPrices(
+    ({ rows, divineRate, failedCategories, answered } = await fetchAllNinjaPrices(
       game,
       league,
       previous?.divine_rate ?? 0,
@@ -200,6 +208,17 @@ async function refreshOneLeague(
       console.log(`    upserted batch ${batchNum}/${totalBatches}`);
     }
   }
+
+  // After the upsert, so a row that came back is already unmarked and counted.
+  await markDelisted(
+    sql,
+    game,
+    league,
+    answered,
+    rows,
+    now,
+    delistMinRatio(process.env.NINJA_DELIST_MIN_RATIO),
+  );
 
   await sql`
     INSERT INTO ninja_price_meta (game, league, divine_rate, item_count, last_refreshed_at)

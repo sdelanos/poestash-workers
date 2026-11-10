@@ -12,7 +12,15 @@ on:
   # silently stops the runs (ADR 0063).
   repository_dispatch:
     types: [refresh-ninja-prices-poe2]
-  workflow_dispatch: {}
+  # A manual run may lower the share of a type's listed rows an answer must
+  # hold before it marks the rest delisted (src/lib/ninja-delisting.ts):
+  # 0 is the one-off backfill (README "Delisted rows"). Empty keeps 0.5.
+  workflow_dispatch:
+    inputs:
+      delist_min_ratio:
+        description: "Delisting floor, 0 to 1 (empty: 0.5, 0: backfill)"
+        required: false
+        default: ""
 
 concurrency:
   group: ninja-refresh-poe2
@@ -29,6 +37,7 @@ jobs:
       # waits for 2.0's cut-over. A failed call warns, never fails the run.
       POESTASH_APP_URL: ${{ vars.POESTASH_APP_URL }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      NINJA_DELIST_MIN_RATIO: ${{ inputs.delist_min_ratio }}
     steps:
       - uses: actions/checkout@v4
 

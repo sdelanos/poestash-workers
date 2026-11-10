@@ -20,3 +20,11 @@ After a run that wrote prices, the seven workers whose tables the app's price pa
 - `CRON_SECRET` (repository secret): the app's own `CRON_SECRET`, the value on Vercel. Rotate both sides together.
 
 A failed call (refused secret, 404, timeout, redirect) logs, adds a warning annotation to the run and never fails it: the prices are written, and the app's cache expires on its own.
+
+## Delisted rows
+
+The ninja workers never delete a `ninja_prices` row and rewrite one only when its figures change, so `updated_at` can't tell an item poe.ninja dropped from one whose figures stood still. After each league's upsert, every feed (source and type) poe.ninja answered marks the league's rows of that feed its answer left out: `delisted_at = now()` (`src/lib/ninja-delisting.ts`). The app prices a row only while `delisted_at` is null. A row that comes back is unmarked by the upsert (`delisted_at` is a data column there, written null).
+
+- A failed request marks nothing (it is in the run's failed categories, and the run fails as before). Nor does an empty answer, or one holding under half the rows the type lists now (`NINJA_DELIST_MIN_RATIO`, default 0.5): the run logs `delisting held back for <source>:<type>` with both counts. A wrong mark lasts one refresh: the next answer that holds the row clears it.
+- Ships after the app's migration that adds the column (`db/migrations/0037_ninja_prices_delisted.sql` in the app repo): an older database refuses the upsert.
+- Backfill: the first run after the deploy marks what is already stale in every type whose answer holds at least half its listed rows. A type held back on that run (its log line says which, typically one with years of dropped items on Standard) is marked by one manual run with the floor at 0: Actions, "Refresh Ninja Prices" (and the PoE 2 one), Run workflow, `delist_min_ratio` 0. An empty answer still marks nothing.

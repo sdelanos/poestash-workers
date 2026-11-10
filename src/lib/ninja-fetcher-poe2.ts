@@ -22,6 +22,7 @@
 
 import type { NinjaExchangeResponse, NinjaFetchedItem } from "./ninja-types";
 import { notOnFeed } from "./ninja-fetcher";
+import type { NinjaFeed } from "./ninja-delisting";
 import { POE2_CATEGORIES } from "./poe2-categories";
 
 const NINJA_BASE = "https://poe.ninja/poe2/api/economy";
@@ -287,7 +288,13 @@ async function fetchItemCategory(
 
 export async function fetchAllPoe2Prices(
   league: string,
-): Promise<{ rows: NinjaFetchedItem[]; divineRate: number; failedCategories: string[] } | null> {
+): Promise<{
+  rows: NinjaFetchedItem[];
+  divineRate: number;
+  failedCategories: string[];
+  /** The feeds poe.ninja answered, as ./ninja-fetcher's. */
+  answered: NinjaFeed[];
+} | null> {
   // Rate must succeed before we touch categories — every chaos value
   // depends on it, unlike PoE 1 where chaos values are independent.
   // `null` means poe.ninja lists the league but has not priced it yet
@@ -296,18 +303,26 @@ export async function fetchAllPoe2Prices(
   if (rate == null) return null;
 
   const failedCategories: string[] = [];
+  const answered: NinjaFeed[] = [];
   const results = await Promise.all(
     POE2_CATEGORIES.map((cat) =>
       (cat.view === "item"
         ? fetchItemCategory(league, cat.apiType, rate)
         : fetchCategory(league, cat.apiType, rate)
-      ).catch((err: unknown) => {
-        console.error(`  ${cat.apiType} failed: ${err instanceof Error ? err.message : err}`);
-        failedCategories.push(cat.apiType);
-        return [] as NinjaFetchedItem[];
-      }),
+      ).then(
+        (rows) => {
+          // The named-item feed's rows are stored as "stash", the others as "exchange".
+          answered.push({ source: cat.view === "item" ? "stash" : "exchange", category: cat.apiType });
+          return rows;
+        },
+        (err: unknown) => {
+          console.error(`  ${cat.apiType} failed: ${err instanceof Error ? err.message : err}`);
+          failedCategories.push(cat.apiType);
+          return [] as NinjaFetchedItem[];
+        },
+      ),
     ),
   );
 
-  return { rows: results.flat(), divineRate: rate.divineRate, failedCategories };
+  return { rows: results.flat(), divineRate: rate.divineRate, failedCategories, answered };
 }
