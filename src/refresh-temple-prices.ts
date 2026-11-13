@@ -14,8 +14,8 @@
  * Pass an explicit league name for an ad-hoc run.
  *
  * Runs every 6h, dispatched by the app's Vercel cron. Each run does ONE search
- * call + ONE fetch call per (league, room) — currently 1 room (gem_room_3),
- * so 2 trade API calls per league per run, each paced by the rate-limit
+ * call + ONE fetch call per (league, room) — currently 2 rooms (gem_room_3, corruption_room_3),
+ * so 4 trade API calls per league per run, each paced by the rate-limit
  * headers (lib/paced-fetch.ts).
  *
  * Requires DATABASE_URL and POE_CLIENT_ID environment variables. POESTASH_APP_URL and CRON_SECRET
@@ -74,7 +74,13 @@ const ROOMS: TempleRoom[] = [
   {
     roomKey: "gem_room_3",
     tradeStatId: "pseudo.pseudo_temple_gem_room_3",
-    label: "Doryani's Institute (gem room t3, double corrupt)",
+    label: "Doryani's Institute (gem room t3, Lapidary Lens)",
+  },
+  {
+    // The app's Craft Simulator and Engine price a Locus of Corruption step from it (PoeStash decision 490).
+    roomKey: "corruption_room_3",
+    tradeStatId: "pseudo.pseudo_temple_corruption_room_3",
+    label: "Locus of Corruption (corruption room t3, Altar of Corruption)",
   },
 ];
 
