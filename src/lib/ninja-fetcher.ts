@@ -216,8 +216,8 @@ export async function fetchAllNinjaPrices(
   // exchange-canonical types — to display poe.ninja-hidden items as
   // dimmed/struck-through "Not counted" rows in the personal stash view).
   //
-  // Exchange feed: only fetch for the 16 types where poe.ninja's UI
-  // actually consumes it (EXCHANGE_CANONICAL_TYPES). The other 24 types
+  // Exchange feed: only fetch for the 19 types where poe.ninja's UI
+  // actually consumes it (EXCHANGE_CANONICAL_TYPES). The other 29 types
   // return empty exchange responses — fetching them was 24 wasted requests
   // per refresh.
   const fetches: Promise<NinjaFetchedItem[]>[] = [];
