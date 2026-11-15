@@ -52,7 +52,15 @@ export const ALL_NINJA_TYPES = [
   "Wombgift",
   "Memory",
   "Astrolabe",
-  "Temple",
+  // poe.ninja's temple type is IncursionTemple: "Temple" answered 404 on every run.
+  "IncursionTemple",
+  // 3.30 (Covens): the categories poe.ninja added. Ducat and EnshroudingCrystal are exchange-only.
+  "Corpse",
+  "Viscera",
+  "Ducat",
+  "EnshroudingCrystal",
+  "ScryingOrb",
+  "Flask",
 ] as const;
 
 export type NinjaType = (typeof ALL_NINJA_TYPES)[number];
@@ -87,6 +95,8 @@ export const EXCHANGE_CANONICAL_TYPES = new Set<NinjaType>([
   "DjinnCoin",
   "Runegraft",
   "Astrolabe",
+  "Ducat",
+  "EnshroudingCrystal",
 ]);
 
 // ---------------------------------------------------------------------------
