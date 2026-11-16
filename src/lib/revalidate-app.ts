@@ -10,6 +10,11 @@
  * 401 `unauthorized` on a wrong or missing secret, 400 `game` on an unknown
  * game. (App side: `src/server/prices/routes.ts`, decision 140.)
  *
+ * A scan job names its feed (`&feed=clusters`, the app's decision 540): the app
+ * then expires only the pages that read that scan, where poe.ninja's call,
+ * naming none, expires every price page of the game. An app before 2.6
+ * ignores the parameter and expires everything, as before.
+ *
  * The call is a courtesy, never a reason to fail a run. The prices are already
  * in Postgres when it happens, and the app's cache expires on its own TTL
  * anyway, so a failed call costs freshness for a few minutes, not data. It
@@ -29,6 +34,9 @@
 
 export type Game = "poe1" | "poe2";
 
+/** The scans the app knows by name (its `lib/pricing` `SCAN_FEEDS`): an unknown one is refused. */
+export type ScanFeed = "clusters" | "gem-usage" | "temples" | "ultimatums" | "scrying";
+
 /** What happened, for the caller's tests; callers in workers ignore it. */
 export type RevalidateOutcome = "skipped" | "revalidated" | "failed";
 
@@ -37,6 +45,8 @@ export interface RevalidateDeps {
   fetch?: typeof fetch;
   /** The whole call, response body included. Well inside a worker's run. */
   timeoutMs?: number;
+  /** The scan this job wrote; none for poe.ninja's prices, which every price page reads. */
+  feed?: ScanFeed;
 }
 
 export const REVALIDATE_PATH = "/api/revalidate/prices";
@@ -44,7 +54,7 @@ export const REVALIDATE_PATH = "/api/revalidate/prices";
 /** Never throws. */
 export async function revalidateAppPrices(
   game: Game,
-  { env = process.env, fetch: fetchImpl = fetch, timeoutMs = 10_000 }: RevalidateDeps = {},
+  { env = process.env, fetch: fetchImpl = fetch, timeoutMs = 10_000, feed }: RevalidateDeps = {},
 ): Promise<RevalidateOutcome> {
   const appUrl = env.POESTASH_APP_URL?.trim().replace(/\/+$/, "");
   const secret = env.CRON_SECRET?.trim();
@@ -60,7 +70,7 @@ export async function revalidateAppPrices(
 
   let url: string;
   try {
-    url = new URL(`${REVALIDATE_PATH}?game=${game}`, appUrl).toString();
+    url = new URL(`${REVALIDATE_PATH}?game=${game}${feed ? `&feed=${feed}` : ""}`, appUrl).toString();
   } catch {
     warn(env, game, `POESTASH_APP_URL is not a URL: ${appUrl}`);
     return "failed";

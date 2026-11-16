@@ -393,7 +393,7 @@ async function main() {
     await sql.end();
     // In the finally so a blocked runner's rooms written before the block show
     // too. Even when another league failed.
-    if (roomsWritten > 0) await revalidateAppPrices("poe1");
+    if (roomsWritten > 0) await revalidateAppPrices("poe1", { feed: "temples" });
   }
 
   if (firstError != null) process.exit(1);

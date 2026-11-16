@@ -365,7 +365,7 @@ async function main() {
       if (result.listingCount > 0) withListings++;
 
       if (Date.now() - lastRevalidateAt >= REVALIDATE_EVERY_MS) {
-        await revalidateAppPrices("poe1");
+        await revalidateAppPrices("poe1", { feed: "clusters" });
         writtenSinceRevalidate = 0;
         lastRevalidateAt = Date.now();
       }
@@ -399,7 +399,7 @@ async function main() {
   console.log(`\nDone! Processed ${processed} combos in ${elapsed} min (${withListings} with listings, ${errors} errors, ${rateLimitHits} rate limit hits)`);
 
   await sql.end();
-  if (writtenSinceRevalidate > 0) await revalidateAppPrices("poe1");
+  if (writtenSinceRevalidate > 0) await revalidateAppPrices("poe1", { feed: "clusters" });
 }
 
 main().catch((err) => {

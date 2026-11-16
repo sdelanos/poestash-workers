@@ -56,6 +56,13 @@ describe("revalidateAppPrices", () => {
     expect(seen[0].headers.authorization).toBe(`Bearer ${SECRET}`);
   });
 
+  it("a scan job names its feed, so the app expires only that scan's pages", async () => {
+    quiet();
+    const env = { POESTASH_APP_URL: origin, CRON_SECRET: SECRET };
+    expect(await revalidateAppPrices("poe1", { env, feed: "clusters" })).toBe("revalidated");
+    expect(seen.at(-1)?.url).toBe("/api/revalidate/prices?game=poe1&feed=clusters");
+  });
+
   // Before the cut-over: 1.x has no such route, so the owner leaves the URL
   // unset, with or without the secret already in place.
   it("skips quietly, without a request, while the app URL is unset", async () => {

@@ -198,7 +198,7 @@ async function main() {
   console.log(`Done in ${elapsed}s${dryRun ? " (dry-run)" : ""}, ${verb} ${totalUpserted} rows`);
 
   // Even when another league failed: the ones written are worth showing now.
-  if (!dryRun && totalUpserted > 0) await revalidateAppPrices("poe1");
+  if (!dryRun && totalUpserted > 0) await revalidateAppPrices("poe1", { feed: "scrying" });
 
   if (firstError != null) process.exit(1);
 }

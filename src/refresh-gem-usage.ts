@@ -269,7 +269,7 @@ async function main() {
   }
 
   // Even when another league failed: the ones written are worth showing now.
-  if (leaguesWritten > 0) await revalidateAppPrices(GAME);
+  if (leaguesWritten > 0) await revalidateAppPrices(GAME, { feed: "gem-usage" });
 
   if (firstError != null) process.exit(1);
 }
