@@ -35,7 +35,7 @@
 export type Game = "poe1" | "poe2";
 
 /** The scans the app knows by name (its `lib/pricing` `SCAN_FEEDS`): an unknown one is refused. */
-export type ScanFeed = "clusters" | "gem-usage" | "temples" | "ultimatums" | "scrying";
+export type ScanFeed = "clusters" | "gem-usage" | "ultimatums";
 
 /** What happened, for the caller's tests; callers in workers ignore it. */
 export type RevalidateOutcome = "skipped" | "revalidated" | "failed";
