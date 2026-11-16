@@ -10,7 +10,7 @@
  * 401 `unauthorized` on a wrong or missing secret, 400 `game` on an unknown
  * game. (App side: `src/server/prices/routes.ts`, decision 140.)
  *
- * A scan job names its feed (`&feed=clusters`, the app's decision 540): the app
+ * A scan job names its feed (`&feed=clusters`, the app's decision 542): the app
  * then expires only the pages that read that scan, where poe.ninja's call,
  * naming none, expires every price page of the game. An app before 2.6
  * ignores the parameter and expires everything, as before.
