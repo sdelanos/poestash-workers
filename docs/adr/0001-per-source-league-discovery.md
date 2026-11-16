@@ -16,7 +16,9 @@ Every price worker discovers its leagues from its own upstream:
   snapshot list for each one's version (the snapshot list is historical, so it
   answers "what version" but not "what's live")
 - ninja → poe.ninja's index-state (pre-existing)
-- temple → `ninja_price_meta` (the set the ninja worker actually priced)
+- temple → `ninja_price_meta` (the set the ninja worker actually priced); retired
+  2026-11-16, since poe.ninja's `IncursionTemple` rows price the temples (the app's
+  decision 545)
 
 Each then reduces that list to the priced set (`lib/priced-set.ts`) and applies
 the three-tier failure contract: skip a league its upstream doesn't yet serve,
