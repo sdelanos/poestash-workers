@@ -1,8 +1,8 @@
 name: Refresh Ninja Prices (PoE 2)
 on:
-  # Every 30 minutes. PoE 2 has 13 categories per league and only one
-  # currently-indexed league, so a full refresh is ~14 fetches and a
-  # few hundred upserts. Completes in a few seconds. The cadence lives in
+  # Every 30 minutes. PoE 2 has 13 categories per league and one or two
+  # live challenge leagues, so a full refresh is ~14 fetches per league and
+  # a few hundred upserts. Completes in a few seconds. The cadence lives in
   # the `vercel.json` cron that fires this event; no `schedule:` fallback
   # (ADR 0063).
   #
@@ -48,8 +48,8 @@ jobs:
 
       - run: npm ci
 
-      # `auto` discovers every indexed PoE 2 league from poe.ninja's
-      # index-state endpoint and refreshes each one in series. Zero-touch
-      # across league rollovers (Standard, Hardcore, temp leagues, etc).
+      # `auto` discovers the softcore challenge PoE 2 leagues from
+      # poe.ninja's index-state endpoint and refreshes each one in series.
+      # Zero-touch across league rollovers.
       - name: Refresh PoE 2 ninja prices (auto-discovery)
         run: npx tsx src/refresh-ninja-prices.ts auto poe2

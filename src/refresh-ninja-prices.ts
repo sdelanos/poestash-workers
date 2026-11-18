@@ -5,8 +5,8 @@
  *   npx tsx src/refresh-ninja-prices.ts <league> [game]
  *
  *   <league>  League name (e.g. "Mirage", "Fate of the Vaal").
- *             For game=poe2, pass "auto" to discover all currently-indexed
- *             PoE 2 leagues via poe.ninja's index-state endpoint and refresh
+ *             For game=poe2, pass "auto" to discover the current softcore
+ *             challenge PoE 2 leagues via poe.ninja's index-state endpoint and refresh
  *             each one in series. Zero-touch across league rollovers.
  *   [game]    "poe1" (default) or "poe2".
  *
@@ -139,8 +139,8 @@ async function refreshOneLeague(
   if (game === "poe2") {
     const result = await fetchAllPoe2Prices(league);
     if (result == null) {
-      // poe.ninja lists the league (indexed: true) but has not priced it
-      // yet — the pre-launch gap between announcement and first trades.
+      // poe.ninja lists the league but has not priced it yet: the
+      // pre-launch gap between announcement and first trades.
       // Skip cleanly so the run stays green; it self-heals once the feed
       // populates, with no code change.
       console.log(
@@ -248,13 +248,13 @@ async function resolveLeagues(game: Game, league: string): Promise<string[]> {
     game === "poe2" ? await discoverPoe2Leagues() : await discoverPoe1Leagues();
 
   if (leagues.length === 0) {
-    // Not an error: no league is indexed right now — the expected gap between
+    // Not an error: no challenge league is listed right now — the expected gap between
     // one league ending and the next launching. Returning [] makes main()
     // skip the refresh and exit 0, so the hourly cron stays green instead of
-    // emailing a failure every hour until the new league is indexed. A
+    // emailing a failure every hour until the new league is listed. A
     // genuine outage throws from discovery (non-OK HTTP) and still fails loud.
     console.log(
-      `No indexed ${game} leagues on poe.ninja right now (between leagues) — nothing to refresh.`,
+      `No ${game} leagues to price on poe.ninja right now (between leagues) — nothing to refresh.`,
     );
     return [];
   }
