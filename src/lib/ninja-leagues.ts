@@ -5,11 +5,15 @@
  * here automatically and the next run prices it.
  *
  * The two games expose index-state differently:
- *   - PoE 2: `economyLeagues` lists every known league with an `indexed`
- *     flag. Only `indexed: true` leagues have priced rows; the rest (HC/SSF
- *     variants, Standard between leagues) return empty. So we filter on it.
- *     Between leagues nothing is indexed, so this returns [] — the caller
- *     treats that as "nothing to refresh" and exits cleanly.
+ *   - PoE 2: `economyLeagues` lists the current leagues, each with
+ *     `hardcore`, `isPrivate` and an `indexed` flag. We price every softcore
+ *     public challenge league listed (`poe2LeaguesToPrice`), not only the
+ *     `indexed: true` ones: poe.ninja dropped the flag from Forbidden Rites a
+ *     week after its launch (2026-09-11) while its economy feed kept pricing
+ *     it, and filtering on the flag froze that league's prices for two months.
+ *     A listed league with no trades yet answers an empty feed, which the
+ *     fetcher already skips. Between leagues only Standard is left, so this
+ *     returns [] and the caller exits cleanly.
  *   - PoE 1: `economyLeagues` is already the currently-priced set (Standard,
  *     Hardcore, plus the live challenge league and its HC variant) with no
  *     `indexed` flag. So we return them all. The permanent leagues are
@@ -23,8 +27,32 @@ interface IndexStateLeague {
   name: string;
   url: string;
   displayName: string;
-  /** PoE 2 only. Absent on PoE 1, where every listed league is priced. */
+  /** PoE 2 only. Not a reliable "priced" signal: see the header. */
   indexed?: boolean;
+  /** PoE 2 only. */
+  hardcore?: boolean;
+  /** PoE 2 only. */
+  isPrivate?: boolean;
+}
+
+/** Name parts of a variant with no trade economy worth pricing. */
+const NO_ECONOMY = ["SSF", "Solo Self-Found", "Ruthless"];
+
+/** PoE 2's leagues to price from index-state's `economyLeagues`: every
+ *  public softcore challenge league, whatever its `indexed` flag. Standard,
+ *  Hardcore and the HC/SSF variants stay out, as before. Pure. */
+export function poe2LeaguesToPrice(
+  leagues: Pick<IndexStateLeague, "name" | "hardcore" | "isPrivate">[],
+): string[] {
+  return leagues
+    .filter(
+      (l) =>
+        !l.hardcore &&
+        !l.isPrivate &&
+        l.name !== "Standard" &&
+        !NO_ECONOMY.some((s) => l.name.includes(s)),
+    )
+    .map((l) => l.name);
 }
 
 interface IndexStateResponse {
@@ -45,11 +73,10 @@ async function fetchEconomyLeagues(
   return data.economyLeagues ?? [];
 }
 
-/** PoE 2: only the leagues poe.ninja currently prices (`indexed: true`).
- *  Empty between leagues. */
+/** PoE 2: the public softcore challenge leagues poe.ninja lists
+ *  (`poe2LeaguesToPrice`). Empty between leagues. */
 export async function discoverPoe2Leagues(): Promise<string[]> {
-  const leagues = await fetchEconomyLeagues("poe2");
-  return leagues.filter((l) => l.indexed).map((l) => l.name);
+  return poe2LeaguesToPrice(await fetchEconomyLeagues("poe2"));
 }
 
 /** PoE 1: every league in `economyLeagues` (already the priced set —
