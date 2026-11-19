@@ -29,13 +29,13 @@ const SIZE_TO_TYPE: Record<JewelSize, string> = {
  * matches DESIRED_PASSIVE_COUNT in the app: a Medium is worth crafting at 4 or
  * 5, a Large only at 8.
  *
- * Small is the exception, because nothing crafts one. Its rows exist so PoB
- * Trader can price the small cluster already sitting in a pasted build
- * (poestash#379), and that jewel is whatever the player has — so the window is
- * the size's whole legal range (RePoE min_skills 2, max_skills 3) and every
- * small matches it. Stated rather than skipped: an absent entry throws below,
- * and a size that opts out of the filter is the understatement bug this module
- * exists to prevent.
+ * A small row priced on one count (poestash decision 569, `passives` 2 or 3)
+ * searches that count exactly: Cluster craft crafts each, and PoB Trader prices
+ * a pasted small jewel by its own. A small row from before the split carries no
+ * count and keeps the size's whole legal range (RePoE min_skills 2, max_skills
+ * 3). Stated rather than skipped: an absent entry throws below, and a size that
+ * opts out of the filter is the understatement bug this module exists to
+ * prevent.
  */
 const PASSIVE_COUNT_STAT = "enchant.stat_3086156145";
 
@@ -48,8 +48,13 @@ const DESIRED_PASSIVE_COUNT: Record<JewelSize, { min: number; max: number }> = {
 export function buildComboSearchQuery(
   jewelSize: JewelSize,
   tradeStatIds: string[],
+  smallPassives?: number | null,
 ): unknown {
-  const passives = DESIRED_PASSIVE_COUNT[jewelSize];
+  const window = DESIRED_PASSIVE_COUNT[jewelSize];
+  const passives =
+    window && jewelSize === "small" && smallPassives
+      ? { min: smallPassives, max: smallPassives }
+      : window;
   // jewel_size comes off an untyped postgres row. An unexpected value would
   // otherwise leave `value` undefined, which JSON.stringify drops — quietly
   // restoring the unfiltered search this module exists to prevent. The refresh
@@ -67,7 +72,7 @@ export function buildComboSearchQuery(
           type: "and",
           filters: [
             ...tradeStatIds.map((id) => ({ id })),
-            { id: PASSIVE_COUNT_STAT, value: DESIRED_PASSIVE_COUNT[jewelSize] },
+            { id: PASSIVE_COUNT_STAT, value: passives },
           ],
         },
       ],

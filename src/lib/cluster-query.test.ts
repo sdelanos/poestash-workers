@@ -36,16 +36,30 @@ describe("buildComboSearchQuery", () => {
   it.each([
     ["medium" as const, { min: 4, max: 5 }],
     ["large" as const, { min: 8, max: 8 }],
-    // Nobody crafts a small, so its window is the size's whole legal range
-    // (RePoE min_skills 2, max_skills 3) rather than a craft's sweet spot.
-    // Every small matches it — the filter is here to keep the shape honest,
-    // not to narrow the search.
+    // A small row from before the per-count split: the size's whole legal
+    // range (RePoE min_skills 2, max_skills 3).
     ["small" as const, { min: 2, max: 3 }],
   ])("filters %s combos on the passive count the craft targets", (jewelSize, passives) => {
     const q = buildComboSearchQuery(jewelSize, ["enchant.stat_111"]) as any;
     expect(q.query.stats[0].filters).toContainEqual({
       id: "enchant.stat_3086156145",
       value: passives,
+    });
+  });
+
+  // A 2 and a 3 passive small sell as different items (poestash decision 569):
+  // a small row priced on one count searches that count exactly. The count is
+  // a small row's alone: a medium or large keeps its craft window.
+  it.each([2, 3])("searches a small row's own passive count exactly: %i", (n) => {
+    const q = buildComboSearchQuery("small", ["enchant.stat_111"], n) as any;
+    expect(q.query.stats[0].filters).toContainEqual({
+      id: "enchant.stat_3086156145",
+      value: { min: n, max: n },
+    });
+    const medium = buildComboSearchQuery("medium", ["enchant.stat_111"], n) as any;
+    expect(medium.query.stats[0].filters).toContainEqual({
+      id: "enchant.stat_3086156145",
+      value: { min: 4, max: 5 },
     });
   });
 

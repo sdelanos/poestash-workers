@@ -93,13 +93,14 @@ async function searchCombo(
   jewelSize: JewelSize,
   tradeStatIds: string[],
   currencyToChaos: Map<string, number>,
+  smallPassives: number | null,
 ): Promise<{ listingCount: number; minPriceChaos: number | null; rateLimited?: number; rateLimitedEndpoint?: string }> {
   const headers: Record<string, string> = {
     "User-Agent": userAgent,
     "Content-Type": "application/json",
   };
 
-  const query = buildComboSearchQuery(jewelSize, tradeStatIds);
+  const query = buildComboSearchQuery(jewelSize, tradeStatIds, smallPassives);
 
   const searchRes = await searchFetch(`${TRADE_BASE}/search/${encodeURIComponent(league)}`, {
     method: "POST",
@@ -194,10 +195,11 @@ async function seedLeagueCombos(
 
   const seeded = await sql`
     INSERT INTO cluster_jewel_prices
-      (game, league, enchantment_tag, jewel_size, combo_key, notable_names, trade_stat_ids)
-    SELECT ${GAME}, ${league}, enchantment_tag, jewel_size, combo_key, notable_names, trade_stat_ids
+      (game, league, enchantment_tag, jewel_size, combo_key, passives, notable_names, trade_stat_ids)
+    SELECT ${GAME}, ${league}, enchantment_tag, jewel_size, combo_key, passives, notable_names, trade_stat_ids
     FROM cluster_jewel_prices
     WHERE game = ${GAME} AND league = ${source.league}
+      AND NOT (jewel_size = 'small' AND passives IS NULL)
     ON CONFLICT (game, league, enchantment_tag, combo_key) DO NOTHING
   `;
   console.log(
@@ -208,11 +210,16 @@ async function seedLeagueCombos(
 /**
  * Add the small-cluster rows to a league's catalog, from the committed
  * catalogue in lib/small-cluster-combos.ts (which is where the size's combo
- * space is explained).
+ * space is explained), one per notable and passive count.
  *
  * Runs on every invocation, not just for an unseeded league: the leagues that
  * already hold a medium/large catalog would otherwise never gain the size.
  * Idempotent — a conflict is a row that already exists.
+ *
+ * Then retires the small rows from before the per-count split (`passives`
+ * null, both counts in one search): the loop no longer refreshes them, and each
+ * is deleted once both its counts' rows have been priced, so PoB Trader reads
+ * the old price until the new ones exist.
  */
 async function seedSmallCombos(
   sql: postgres.Sql,
@@ -225,6 +232,22 @@ async function seedSmallCombos(
   `;
   if (seeded.count > 0) {
     console.log(`Seeded ${seeded.count} small combos for ${league}`);
+  }
+  const retired = await sql`
+    DELETE FROM cluster_jewel_prices old
+    WHERE old.game = ${GAME} AND old.league = ${league}
+      AND old.jewel_size = 'small' AND old.passives IS NULL
+      AND (
+        SELECT count(*) FROM cluster_jewel_prices n
+        WHERE n.game = old.game AND n.league = old.league
+          AND n.enchantment_tag = old.enchantment_tag
+          AND n.jewel_size = 'small' AND n.passives IS NOT NULL
+          AND n.notable_names = old.notable_names
+          AND n.last_refreshed_at IS NOT NULL
+      ) = 2
+  `;
+  if (retired.count > 0) {
+    console.log(`Retired ${retired.count} small combos priced on both passive counts`);
   }
 }
 
@@ -291,7 +314,8 @@ async function main() {
 
   // Count targets
   const [{ count: targetCount }] = await sql`
-    SELECT count(*) FROM cluster_jewel_prices WHERE game = ${GAME} AND league = ${league}
+    SELECT count(*) FROM cluster_jewel_prices
+    WHERE game = ${GAME} AND league = ${league} AND NOT (jewel_size = 'small' AND passives IS NULL)
   `;
 
   // No ETA: the pace comes from the rate-limit headers and retunes as they
@@ -313,10 +337,11 @@ async function main() {
     // Combos with listings: refresh every 24h
     // Combos with 0 listings: refresh every 48h
     const [combo] = await sql`
-      SELECT league, enchantment_tag, jewel_size, combo_key, trade_stat_ids, listing_count, last_refreshed_at
+      SELECT league, enchantment_tag, jewel_size, combo_key, passives, trade_stat_ids, listing_count, last_refreshed_at
       FROM cluster_jewel_prices
       WHERE game = ${GAME}
         AND league = ${league}
+        AND NOT (jewel_size = 'small' AND passives IS NULL)
         AND (last_refreshed_at IS NULL
           OR listing_count IS NULL
           OR (listing_count > 0 AND last_refreshed_at < NOW() - INTERVAL '24 hours')
@@ -337,6 +362,7 @@ async function main() {
         combo.jewel_size,
         combo.trade_stat_ids as string[],
         currencyToChaos,
+        combo.passives as number | null,
       );
 
       if (result.rateLimited) {

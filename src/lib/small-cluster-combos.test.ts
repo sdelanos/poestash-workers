@@ -29,20 +29,22 @@ describe("smallComboRows", () => {
     },
   ];
 
-  it("keys the row on PoE 1 and the notable's name", () => {
-    // The table's combo_key is the " + "-joined notable list, and a small
-    // cluster's list is one name long.
-    expect(smallComboRows("Allflame", combos)).toEqual([
-      {
+  it("makes one row per passive count, keyed on the notable and the count", () => {
+    // A 2 and a 3 passive small jewel sell as different items (poestash
+    // decision 569), so each count is a row of its own. The count rides in
+    // combo_key so the table's key stays (game, league, tag, combo_key).
+    expect(smallComboRows("Allflame", combos)).toEqual(
+      [2, 3].map((passives) => ({
         game: "poe1",
         league: "Allflame",
         enchantment_tag: "affliction_armour",
         jewel_size: "small",
-        combo_key: "Enduring Composure",
+        combo_key: `Enduring Composure|${passives}`,
+        passives,
         notable_names: ["Enduring Composure"],
         trade_stat_ids: ["explicit.stat_2043284086"],
-      },
-    ]);
+      })),
+    );
   });
 
   it("leaves the JSONB values as arrays", () => {
