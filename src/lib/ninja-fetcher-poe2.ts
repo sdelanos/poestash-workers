@@ -24,6 +24,7 @@ import type { NinjaExchangeResponse, NinjaFetchedItem } from "./ninja-types";
 import { notOnFeed } from "./ninja-fetcher";
 import type { NinjaFeed } from "./ninja-delisting";
 import { POE2_CATEGORIES } from "./poe2-categories";
+import { ninjaFetch } from "./ninja-http";
 
 const NINJA_BASE = "https://poe.ninja/poe2/api/economy";
 const POECDN_BASE = "https://web.poecdn.com";
@@ -52,7 +53,7 @@ interface RateInfo {
  *  PoE 1 where chaos values come straight from the response. */
 async function getRateInfo(league: string): Promise<RateInfo | null> {
   const url = `${NINJA_BASE}/exchange/current/overview?league=${encodeURIComponent(league)}&type=Currency`;
-  const res = await fetch(url);
+  const res = await ninjaFetch(url);
   if (!res.ok) {
     throw new Error(`poe.ninja Currency fetch ${res.status}: ${res.statusText}`);
   }
@@ -124,7 +125,7 @@ async function fetchCategory(
   rate: RateInfo,
 ): Promise<NinjaFetchedItem[]> {
   const url = `${NINJA_BASE}/exchange/current/overview?league=${encodeURIComponent(league)}&type=${apiType}`;
-  const res = await fetch(url);
+  const res = await ninjaFetch(url);
   if (!res.ok) return notOnFeed(res, url);
 
   const data = (await res.json()) as NinjaExchangeResponse;
@@ -229,7 +230,7 @@ async function fetchItemCategory(
   rate: RateInfo,
 ): Promise<NinjaFetchedItem[]> {
   const url = `${NINJA_BASE}/stash/current/item/overview?league=${encodeURIComponent(league)}&type=${apiType}`;
-  const res = await fetch(url);
+  const res = await ninjaFetch(url);
   if (!res.ok) return notOnFeed(res, url);
 
   const data = (await res.json()) as Poe2ItemResponse;

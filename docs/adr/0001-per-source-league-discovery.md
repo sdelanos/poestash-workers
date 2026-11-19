@@ -12,10 +12,10 @@ selector. We deliberately do not do this.
 Every price worker discovers its leagues from its own upstream:
 
 - ultimatum → poe.watch `/leagues`
-- gem-usage → poe.ninja's index-state for the current leagues, then its build
+- gem-usage (stopped 2026-11-19, ADR 0004) → poe.ninja's index-state for the current leagues, then its build
   snapshot list for each one's version (the snapshot list is historical, so it
   answers "what version" but not "what's live")
-- ninja → poe.ninja's index-state (pre-existing)
+- ninja → poe.ninja's index-state (pre-existing), its documented `/api/economy/leagues` since 2026-11-19 (ADR 0004)
 - temple → `ninja_price_meta` (the set the ninja worker actually priced); retired
   2026-11-16, since poe.ninja's `IncursionTemple` rows price the temples (the app's
   decision 545)
