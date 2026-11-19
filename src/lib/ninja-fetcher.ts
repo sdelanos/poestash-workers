@@ -12,6 +12,7 @@ import {
 } from "./ninja-types";
 import { mapStashCurrencyRows } from "./stash-currency-rows";
 import type { NinjaFeed } from "./ninja-delisting";
+import { ninjaFetch } from "./ninja-http";
 
 const NINJA_BASE = "https://poe.ninja/poe1/api/economy";
 const POECDN_BASE = "https://web.poecdn.com";
@@ -51,7 +52,7 @@ async function fetchStashCurrency(
   divineRate: number,
 ): Promise<NinjaFetchedItem[]> {
   const url = `${NINJA_BASE}/stash/current/currency/overview?league=${encodeURIComponent(league)}&type=${type}`;
-  const res = await fetch(url);
+  const res = await ninjaFetch(url);
   if (!res.ok) return notOnFeed(res, url);
 
   const data: NinjaCurrencyResponse = await res.json();
@@ -71,7 +72,7 @@ async function fetchStashItems(
   divineRate: number,
 ): Promise<NinjaFetchedItem[]> {
   const url = `${NINJA_BASE}/stash/current/item/overview?league=${encodeURIComponent(league)}&type=${type}`;
-  const res = await fetch(url);
+  const res = await ninjaFetch(url);
   if (!res.ok) return notOnFeed(res, url);
 
   const data: NinjaItemResponse = await res.json();
@@ -123,7 +124,7 @@ async function fetchExchange(
   divineRate: number,
 ): Promise<NinjaFetchedItem[]> {
   const url = `${NINJA_BASE}/exchange/current/overview?league=${encodeURIComponent(league)}&type=${type}`;
-  const res = await fetch(url);
+  const res = await ninjaFetch(url);
   if (!res.ok) return notOnFeed(res, url);
 
   const data: NinjaExchangeResponse = await res.json();
@@ -175,7 +176,7 @@ export async function fetchAllNinjaPrices(
   let divineRate = 0;
   try {
     const url = `${NINJA_BASE}/exchange/current/overview?league=${encodeURIComponent(league)}&type=Currency`;
-    const res = await fetch(url);
+    const res = await ninjaFetch(url);
     if (res.ok) {
       const data: NinjaExchangeResponse = await res.json();
       const divineIdx = data.items.findIndex((item) => item.name === "Divine Orb");
@@ -191,7 +192,7 @@ export async function fetchAllNinjaPrices(
   if (divineRate === 0) {
     try {
       const url = `${NINJA_BASE}/stash/current/currency/overview?league=${encodeURIComponent(league)}&type=Currency`;
-      const res = await fetch(url);
+      const res = await ninjaFetch(url);
       if (res.ok) {
         const data: NinjaCurrencyResponse = await res.json();
         const divine = data.lines.find((l) => l.currencyTypeName === "Divine Orb");

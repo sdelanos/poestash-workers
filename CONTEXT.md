@@ -11,8 +11,8 @@ into the shared database the app reads from.
 **Priced set**:
 The leagues a price worker refreshes: Standard, Hardcore, every live challenge
 league, and each one's Hardcore variant. SSF and Ruthless variants are never
-priced. Some workers narrow it (gem-usage drops permanent Hardcore, poe.ninja
-keeps no build snapshot for it).
+priced. Some workers narrow it (gem-usage, stopped since 2026-11-19, dropped
+permanent Hardcore: poe.ninja kept no build snapshot for it).
 
 **Challenge league**:
 A temporary league (e.g. "Mirage"). Formally: a listed league that isn't

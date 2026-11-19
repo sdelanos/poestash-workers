@@ -1,17 +1,16 @@
 name: Refresh Gem Usage
 on:
-  # Every 6 hours at :15 — poe.ninja's build snapshots refresh slowly
-  # (every few hours), so polling more often wastes API calls without
-  # giving us fresher data. Each run fetches ~225 KB and writes ~800
-  # rows per league. The cadence lives in the `vercel.json` cron that
-  # fires this event; no `schedule:` fallback (ADR 0063).
-  #
-  # Fired by /api/cron/dispatch-worker in sdelanos/poestash. The `types`
-  # value is the contract: that route sends this exact event_type, and GitHub
-  # answers 204 for an event type nothing listens for, so renaming one side
-  # silently stops the runs (ADR 0063).
-  repository_dispatch:
-    types: [refresh-gem-usage]
+  # Stopped on 2026-11-19. poe.ninja closed its builds / profiles API to third
+  # parties (https://poe.ninja/docs/api, "What is not allowed"): the version
+  # moved out of index-state and the search sits behind a Cloudflare challenge
+  # that answers 403 to any non-browser client. Every run from 2026-11-18
+  # 12:15 UTC failed. The `repository_dispatch` trigger is gone, so the app's
+  # dispatch no longer starts a run (GitHub answers 204 for an event type
+  # nothing listens for), and `ninja_gem_usage` keeps its last snapshot
+  # (2026-11-18 06:15 UTC). The job is off too (`if: false`), so not even a
+  # run by hand reaches poe.ninja's builds API, which their docs forbid and
+  # which risks getting the price workers blocked. Kept for a workaround from
+  # a sanctioned source. See README "Gem usage is stopped".
   workflow_dispatch: {}
 
 concurrency:
@@ -20,6 +19,10 @@ concurrency:
 
 jobs:
   refresh:
+    # Off while poe.ninja's builds API is closed to third parties (see `on:`
+    # above): even a run by hand would call it. Remove this line only once the
+    # worker reads a sanctioned source.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:

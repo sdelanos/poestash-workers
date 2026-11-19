@@ -35,8 +35,8 @@ export interface LeagueLike {
 }
 
 export interface PricedSetOptions {
-  /** Drop the permanent Hardcore league. gem-usage sets this: poe.ninja keeps
-   *  no build snapshot for permanent Hardcore. The Hardcore *challenge* variant
+  /** Drop the permanent Hardcore league. gem-usage (stopped, see README)
+   *  sets this: poe.ninja kept no build snapshot for permanent Hardcore. The Hardcore *challenge* variant
    *  (e.g. "Hardcore Mirage") is unaffected. */
   includePermanentHardcore?: boolean;
   /** Override "now" for tests. */
