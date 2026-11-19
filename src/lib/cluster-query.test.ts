@@ -47,7 +47,7 @@ describe("buildComboSearchQuery", () => {
     });
   });
 
-  // A 2 and a 3 passive small sell as different items (poestash decision 569):
+  // A 2 and a 3 passive small sell as different items (poestash decision 579):
   // a small row priced on one count searches that count exactly. The count is
   // a small row's alone: a medium or large keeps its craft window.
   it.each([2, 3])("searches a small row's own passive count exactly: %i", (n) => {
@@ -61,6 +61,19 @@ describe("buildComboSearchQuery", () => {
       id: "enchant.stat_3086156145",
       value: { min: 4, max: 5 },
     });
+  });
+
+  // A small notable rolls on two enchantments (Heart of Iron on Life and
+  // Armour), which sell apart: a small row on one count names its enchantment.
+  // A medium or large, or a small row from before the split, doesn't.
+  it("names a small row's enchantment", () => {
+    const enchant = { id: "enchant.stat_3948993189|42" };
+    const small = buildComboSearchQuery("small", ["explicit.stat_1"], 2, "affliction_armour") as any;
+    expect(small.query.stats[0].filters).toContainEqual(enchant);
+    const legacy = buildComboSearchQuery("small", ["explicit.stat_1"], null, "affliction_armour") as any;
+    expect(legacy.query.stats[0].filters).not.toContainEqual(enchant);
+    const medium = buildComboSearchQuery("medium", ["explicit.stat_1"], null, "affliction_armour") as any;
+    expect(medium.query.stats[0].filters).toHaveLength(2);
   });
 
   // Better a combo the loop logs and skips than one priced against every

@@ -94,13 +94,14 @@ async function searchCombo(
   tradeStatIds: string[],
   currencyToChaos: Map<string, number>,
   smallPassives: number | null,
+  enchantmentTag: string,
 ): Promise<{ listingCount: number; minPriceChaos: number | null; rateLimited?: number; rateLimitedEndpoint?: string }> {
   const headers: Record<string, string> = {
     "User-Agent": userAgent,
     "Content-Type": "application/json",
   };
 
-  const query = buildComboSearchQuery(jewelSize, tradeStatIds, smallPassives);
+  const query = buildComboSearchQuery(jewelSize, tradeStatIds, smallPassives, enchantmentTag);
 
   const searchRes = await searchFetch(`${TRADE_BASE}/search/${encodeURIComponent(league)}`, {
     method: "POST",
@@ -219,7 +220,9 @@ async function seedLeagueCombos(
  * Then retires the small rows from before the per-count split (`passives`
  * null, both counts in one search): the loop no longer refreshes them, and each
  * is deleted once both its counts' rows have been priced, so PoB Trader reads
- * the old price until the new ones exist.
+ * the old price until the new ones exist. Matched by key ("<notable>" against
+ * "<notable>|2" and "<notable>|3"), not by `notable_names`, which an old row
+ * may hold as a stringified cell.
  */
 async function seedSmallCombos(
   sql: postgres.Sql,
@@ -242,7 +245,7 @@ async function seedSmallCombos(
         WHERE n.game = old.game AND n.league = old.league
           AND n.enchantment_tag = old.enchantment_tag
           AND n.jewel_size = 'small' AND n.passives IS NOT NULL
-          AND n.notable_names = old.notable_names
+          AND n.combo_key IN (old.combo_key || '|2', old.combo_key || '|3')
           AND n.last_refreshed_at IS NOT NULL
       ) = 2
   `;
@@ -363,6 +366,7 @@ async function main() {
         combo.trade_stat_ids as string[],
         currencyToChaos,
         combo.passives as number | null,
+        combo.enchantment_tag as string,
       );
 
       if (result.rateLimited) {

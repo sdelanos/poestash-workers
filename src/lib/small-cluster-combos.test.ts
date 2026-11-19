@@ -31,7 +31,7 @@ describe("smallComboRows", () => {
 
   it("makes one row per passive count, keyed on the notable and the count", () => {
     // A 2 and a 3 passive small jewel sell as different items (poestash
-    // decision 569), so each count is a row of its own. The count rides in
+    // decision 579), so each count is a row of its own. The count rides in
     // combo_key so the table's key stays (game, league, tag, combo_key).
     expect(smallComboRows("Allflame", combos)).toEqual(
       [2, 3].map((passives) => ({

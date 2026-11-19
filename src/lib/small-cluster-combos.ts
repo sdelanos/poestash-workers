@@ -8,7 +8,7 @@
  * notable per enchantment — 146 combos — and fits in a committed file, generated
  * from RePoE by poestash's scripts/gen-small-cluster-combos.ts.
  *
- * Each combo is priced twice, once per passive count (poestash decision 569):
+ * Each combo is priced twice, once per passive count (poestash decision 579):
  * a 2 passive small jewel (the notable for 2 points) and a 3 passive one (3
  * points, an extra small passive) sell as different items, from 10c against
  * 120c for Introspection to 50c against 20c for One with the Shield. One search
