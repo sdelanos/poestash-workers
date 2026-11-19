@@ -29,13 +29,13 @@ const SIZE_TO_TYPE: Record<JewelSize, string> = {
  * matches DESIRED_PASSIVE_COUNT in the app: a Medium is worth crafting at 4 or
  * 5, a Large only at 8.
  *
- * Small is the exception, because nothing crafts one. Its rows exist so PoB
- * Trader can price the small cluster already sitting in a pasted build
- * (poestash#379), and that jewel is whatever the player has — so the window is
- * the size's whole legal range (RePoE min_skills 2, max_skills 3) and every
- * small matches it. Stated rather than skipped: an absent entry throws below,
- * and a size that opts out of the filter is the understatement bug this module
- * exists to prevent.
+ * A small row priced on one count (poestash decision 579, `passives` 2 or 3)
+ * searches that count exactly: Cluster craft crafts each, and PoB Trader prices
+ * a pasted small jewel by its own. A small row from before the split carries no
+ * count and keeps the size's whole legal range (RePoE min_skills 2, max_skills
+ * 3). Stated rather than skipped: an absent entry throws below, and a size that
+ * opts out of the filter is the understatement bug this module exists to
+ * prevent.
  */
 const PASSIVE_COUNT_STAT = "enchant.stat_3086156145";
 
@@ -45,16 +45,51 @@ const DESIRED_PASSIVE_COUNT: Record<JewelSize, { min: number; max: number }> = {
   large: { min: 8, max: 8 },
 };
 
+/**
+ * The trade site's "Added Small Passive Skills grant: #" option per small
+ * enchantment tag (poestash `lib/trade` ENCHANT_OPTIONS, keyed there by the
+ * pool's name). A small notable can roll on two enchantments (Heart of Iron on
+ * Life and Armour, 29 notables in all), and each sells as its own item, so a
+ * small row priced on one count also names its enchantment (poestash decision
+ * 579). A tag missing here searches without it, as before the split.
+ */
+const ENCHANT_STAT = "enchant.stat_3948993189";
+const SMALL_ENCHANT_OPTION: Record<string, string> = {
+  affliction_maximum_life: "39",
+  affliction_maximum_energy_shield: "40",
+  affliction_maximum_mana: "41",
+  affliction_armour: "42",
+  affliction_evasion: "43",
+  affliction_chance_to_block: "44",
+  affliction_fire_resistance: "46",
+  affliction_cold_resistance: "47",
+  affliction_lightning_resistance: "48",
+  affliction_chaos_resistance: "49",
+  affliction_chance_to_dodge_attacks: "50",
+  affliction_reservation_efficiency_small: "54",
+  affliction_curse_effect_small: "55",
+};
+
 export function buildComboSearchQuery(
   jewelSize: JewelSize,
   tradeStatIds: string[],
+  smallPassives?: number | null,
+  enchantmentTag?: string,
 ): unknown {
-  const passives = DESIRED_PASSIVE_COUNT[jewelSize];
+  const window = DESIRED_PASSIVE_COUNT[jewelSize];
+  const passives =
+    window && jewelSize === "small" && smallPassives
+      ? { min: smallPassives, max: smallPassives }
+      : window;
   // jewel_size comes off an untyped postgres row. An unexpected value would
   // otherwise leave `value` undefined, which JSON.stringify drops — quietly
   // restoring the unfiltered search this module exists to prevent. The refresh
   // loop catches and logs per combo, so failing is the containable outcome.
   if (!passives) throw new Error(`Unknown jewel size: ${jewelSize}`);
+  const enchantOption =
+    jewelSize === "small" && smallPassives && enchantmentTag
+      ? SMALL_ENCHANT_OPTION[enchantmentTag]
+      : undefined;
 
   return {
     query: {
@@ -67,7 +102,8 @@ export function buildComboSearchQuery(
           type: "and",
           filters: [
             ...tradeStatIds.map((id) => ({ id })),
-            { id: PASSIVE_COUNT_STAT, value: DESIRED_PASSIVE_COUNT[jewelSize] },
+            ...(enchantOption ? [{ id: `${ENCHANT_STAT}|${enchantOption}` }] : []),
+            { id: PASSIVE_COUNT_STAT, value: passives },
           ],
         },
       ],
