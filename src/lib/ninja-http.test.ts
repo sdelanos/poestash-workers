@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NINJA_USER_AGENT, ninjaFetch, retryAfterMs } from "./ninja-http";
+import { NINJA_USER_AGENT, ninjaFetch, resetNinjaPacing, retryAfterMs } from "./ninja-http";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  resetNinjaPacing();
 });
 
 describe("retryAfterMs", () => {
@@ -23,20 +24,24 @@ describe("ninjaFetch", () => {
     expect(fetch.mock.calls[0][1]).toMatchObject({ headers: { "User-Agent": NINJA_USER_AGENT } });
   });
 
-  it("never has more than 2 requests in flight", async () => {
+  it("sends one request at a time, each start at least 300 ms after the last", async () => {
+    resetNinjaPacing(300);
     let inFlight = 0;
     let peak = 0;
+    const starts: number[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
+        starts.push(Date.now());
         peak = Math.max(peak, ++inFlight);
         await new Promise((r) => setTimeout(r, 5));
         inFlight--;
         return new Response("[]");
       }),
     );
-    await Promise.all(Array.from({ length: 20 }, (_, i) => ninjaFetch(`https://poe.ninja/x/${i}`)));
-    expect(peak).toBe(2);
+    await Promise.all(Array.from({ length: 4 }, (_, i) => ninjaFetch(`https://poe.ninja/x/${i}`)));
+    expect(peak).toBe(1);
+    for (let i = 1; i < starts.length; i++) expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(295);
   });
 
   it("retries a 429 after its Retry-After, then answers the success", async () => {
