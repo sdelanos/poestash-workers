@@ -17,7 +17,7 @@ Retired on 2026-11-16 (the app's decision 545): the temple scan (`refresh-temple
 poe.ninja's API reference (https://poe.ninja/docs/api) is the contract, and ADR 0004 the reasons. The ninja workers price the whole app, so a block from poe.ninja would take every price page down with it.
 
 - Only the documented economy endpoints: `/<game>/api/economy/leagues` and the exchange, stash item and stash currency overviews. Never the builds / profiles API, character, PoB or anything else they call internal.
-- Every request goes through `src/lib/ninja-http.ts`: the `poestash-workers/1.0` User-Agent with the site and contact, at most 2 requests in flight, and a 429 retried after its `Retry-After`, twice at most. A new poe.ninja call uses `ninjaFetch`, never a bare `fetch`.
+- Every request goes through `src/lib/ninja-http.ts`: the `poestash-workers/1.0` User-Agent with the site and contact, one request at a time and 300 ms apart, and a 429 retried after its `Retry-After`, twice at most. A new poe.ninja call uses `ninjaFetch`, never a bare `fetch`.
 - Never faster than every 30 minutes (ADR 0004). Both workers run hourly since the app's decision 643, PoE 1 at :00 and PoE 2 at :30, so their requests never overlap (the app's `vercel.json` crons; the app's copy and staleness bars assume an hour). The overviews refresh about every 15 minutes for PoE 1 and every hour for PoE 2.
 
 ### Gem usage is stopped
