@@ -2,8 +2,8 @@
 
 Background workers for [PoeStash](https://www.poestash.com). Runs via GitHub Actions on a schedule.
 
-- **Ninja prices, PoE 1** (`refresh-ninja-prices.yml`): refreshes poe.ninja PoE 1 prices every 30 minutes.
-- **Ninja prices, PoE 2** (`refresh-ninja-prices-poe2.yml`): refreshes poe.ninja PoE 2 prices every 30 minutes.
+- **Ninja prices, PoE 1** (`refresh-ninja-prices.yml`): refreshes poe.ninja PoE 1 prices every hour, on the hour.
+- **Ninja prices, PoE 2** (`refresh-ninja-prices-poe2.yml`): refreshes poe.ninja PoE 2 prices every hour, at half past.
 - **Cluster prices** (`refresh-cluster-prices.yml`): refreshes cluster jewel combo prices every 6 hours.
 - **Ultimatum prices** (`refresh-ultimatum-prices.yml`): refreshes Inscribed Ultimatum prices hourly.
 - **Gem usage** (`refresh-gem-usage.yml`): stopped since 2026-11-19, see below. Refreshed per-gem player counts every 6 hours.
@@ -18,7 +18,7 @@ poe.ninja's API reference (https://poe.ninja/docs/api) is the contract, and ADR 
 
 - Only the documented economy endpoints: `/<game>/api/economy/leagues` and the exchange, stash item and stash currency overviews. Never the builds / profiles API, character, PoB or anything else they call internal.
 - Every request goes through `src/lib/ninja-http.ts`: the `poestash-workers/1.0` User-Agent with the site and contact, at most 2 requests in flight, and a 429 retried after its `Retry-After`, twice at most. A new poe.ninja call uses `ninjaFetch`, never a bare `fetch`.
-- Never faster than every 30 minutes: both workers run on that cadence, PoE 1 at :00 and :30, PoE 2 at :15 and :45 so their requests never overlap (the app's `vercel.json` crons, the app's copy and staleness bars assume 30 minutes). The overviews refresh about every 15 minutes for PoE 1 and every hour for PoE 2.
+- Never faster than every 30 minutes (ADR 0004). Both workers run hourly since the app's decision 643, PoE 1 at :00 and PoE 2 at :30, so their requests never overlap (the app's `vercel.json` crons; the app's copy and staleness bars assume an hour). The overviews refresh about every 15 minutes for PoE 1 and every hour for PoE 2.
 
 ### Gem usage is stopped
 

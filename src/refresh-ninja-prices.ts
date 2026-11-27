@@ -15,7 +15,8 @@
  *   npx tsx src/refresh-ninja-prices.ts "Fate of the Vaal" poe2
  *   npx tsx src/refresh-ninja-prices.ts auto poe2
  *
- * Fired every 30 minutes by the poestash vercel.json cron (ADR 0063).
+ * Fired every hour by the poestash vercel.json cron (ADR 0063): PoE 1 on the
+ * hour, PoE 2 at half past (decision 643).
  * Each run does a full refresh: fetch all categories, batch upsert.
  *
  * Rows are never deleted by this worker. A row poe.ninja's full answer for
